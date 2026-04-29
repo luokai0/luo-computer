@@ -202,9 +202,11 @@ public:
 
     bool register_user(std::string username, std::string password, std::string email = {}, ConsentFlags consent = {});
     bool login(std::string_view username, std::string_view password);
-    void logout();
-    bool authenticated() const;
-    std::string current_user() const;
+    bool export_user_settings(const std::filesystem::path& destination) const;
+    bool import_user_settings(const std::filesystem::path& source);
+    bool reset_workspace();
+
+    // New workspace APIs
 
     ConsentFlags consent() const;
     bool set_consent(ConsentFlags consent);

@@ -154,6 +154,14 @@ std::string rowify(const std::vector<std::string>& columns) {
     return out.str();
 }
 
+std::string trim(std::string_view text) {
+    auto begin = text.begin();
+    auto end = text.end();
+    while (begin != end && std::isspace(static_cast<unsigned char>(*begin))) ++begin;
+    while (end != begin && std::isspace(static_cast<unsigned char>(*(end - 1)))) --end;
+    return {begin, end};
+}
+
 } // namespace
 
 App::App(std::filesystem::path data_root) : data_root_(data_root.empty() ? default_data_root() : std::move(data_root)) {
@@ -575,6 +583,64 @@ void App::record_audit(std::string actor, std::string action, std::string detail
 
 void App::touch() {
     if (auto_save_) save();
+}
+
+bool App::export_user_settings(const std::filesystem::path& destination) const {
+    if (active_user_.empty()) return false;
+    std::error_code ec;
+    std::filesystem::create_directories(destination, ec);
+    const auto file = destination / "user-settings.tsv";
+    std::ofstream out(file);
+    if (!out) return false;
+    const auto& ws = workspace();
+    out << rowify({"consent", serialize_consent(ws.consent)}) << "\n";
+    out << rowify({
+        "session",
+        escape_json(session_.title),
+        escape_json(session_.note),
+        escape_json(session_stage_to_string(session_.stage)),
+        escape_json(session_.stage_detail),
+    }) << "\n";
+    out << rowify({"active_computer", escape_json(ws.active_computer_id)}) << "\n";
+    return true;
+}
+
+bool App::import_user_settings(const std::filesystem::path& source) {
+    if (active_user_.empty()) return false;
+    const auto file = source / "user-settings.tsv";
+    std::ifstream in(file);
+    if (!in) return false;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        const auto parts = split(line, '\t');
+        if (parts.empty()) continue;
+        const auto kind = parts[0];
+        if (kind == "consent" && parts.size() >= 2) {
+            const auto consent = parse_consent(split(unquote(parts[1]), '|'));
+            set_consent(consent);
+        } else if (kind == "session" && parts.size() >= 5) {
+            session_.title = unquote(parts[1]);
+            session_.note = unquote(parts[2]);
+            session_.stage = session_stage_from_string(unquote(parts[3]));
+            set_session_stage(session_.stage, unquote(parts[4]));
+        } else if (kind == "active_computer" && parts.size() >= 2) {
+            workspace().active_computer_id = unquote(parts[1]);
+        }
+    }
+    touch();
+    return true;
+}
+
+bool App::reset_workspace() {
+    if (active_user_.empty()) return false;
+    const auto consent = workspace().consent;
+    workspace() = Workspace{consent};
+    ensure_workspace_seeded();
+    set_session_stage(SessionStage::Idle, "Workspace reset");
+    record_audit(active_user_, "workspace", "reset workspace");
+    touch();
+    return true;
 }
 
 std::filesystem::path App::state_file() const { return data_root_ / "state.tsv"; }

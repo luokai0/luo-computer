@@ -2,16 +2,20 @@
 #include "luo_gate/platform.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <iostream>
 
 namespace luo_gate {
 
 StartupFlow::StartupFlow(App& app, std::istream& in, std::ostream& out)
-    : app_(app), in_(in), out_(out) {}
+    : app_(app), in_(in), out_(out), first_run_(false) {}
 
 int StartupFlow::run(int port, const std::filesystem::path& exe_path) {
     show_banner();
+    show_capabilities();
+    show_limitations();
+    show_consent_notice();
 
     if (!ensure_authenticated()) {
         out_ << "Authentication failed.\n";
@@ -32,6 +36,11 @@ int StartupFlow::run(int port, const std::filesystem::path& exe_path) {
     if (!prepare_workspace(luo_os_root)) {
         out_ << "Workspace preparation failed.\n";
         return 4;
+    }
+
+    if (first_run_) {
+        offer_demo_mode();
+        first_run_ = false;
     }
 
     out_ << "Launching LUO COMPUTER on port " << port << "...\n";
@@ -86,7 +95,8 @@ bool StartupFlow::prepare_workspace(const std::filesystem::path& exe_path) {
         return false;
     }
 
-    if (app_.tasks().empty()) {
+    first_run_ = app_.tasks().empty();
+    if (first_run_) {
         app_.create_task("Bootstrap swarm", "Create the first visible swarm", "bootstrap");
         app_.tick();
     }
@@ -133,6 +143,53 @@ void StartupFlow::show_banner() {
     out_ << "==============" << "\n";
     out_ << "A visible swarm runtime powered by the LUO OS tree." << "\n";
     out_ << "" << "\n";
+}
+
+void StartupFlow::show_capabilities() {
+    out_ << "Capabilities:\n";
+    out_ << "- Visible swarm of seeded agents coordinating tasks in real time\n";
+    out_ << "- Auditable timeline of computer actions, tasks, and agent plans\n";
+    out_ << "- Self-hosted LUO OS tree with browser, terminal, files, and project runner support\n";
+    out_ << "- Structured session state so you can pause/resume, inspect, and replay\n";
+    out_ << "" << "\n";
+}
+
+void StartupFlow::show_limitations() {
+    out_ << "Limitations:\n";
+    out_ << "- Local-only data; no outbound network actions unless explicitly allowed\n";
+    out_ << "- No stealth monitoring—every computer action is logged and visible\n";
+    out_ << "- Agents follow deterministic roles; there is no unpredictable autonomy yet\n";
+    out_ << "" << "\n";
+}
+
+void StartupFlow::show_consent_notice() {
+    out_ << "Consent info:\n";
+    out_ << "- You can toggle consent for history, files, devices, and analytics anytime\n";
+    out_ << "- Sensitive actions require explicit approval before running\n";
+    out_ << "- All secrets and logs stay in your workspace; nothing is shared externally\n";
+    out_ << "\n";
+}
+
+bool StartupFlow::offer_demo_mode() {
+    if (!confirm("Run the first-run demo with sample agents, tasks, and actions?", true)) {
+        return false;
+    }
+    const auto computer = app_.active_computer_id();
+    const std::array<std::pair<const char*, const char*>, 2> demos = {
+        std::pair{"Demo research task", "Walk through the LUO OS tree and gather context"},
+        std::pair{"Demo project task", "Launch a safe project execution to show artifacts"},
+    };
+    int created = 0;
+    for (const auto& [title, desc] : demos) {
+        if (app_.create_task(title, desc, "demo")) {
+            created++;
+            app_.tick();
+        }
+    }
+    app_.record_computer_action(computer, "demo-agent", "computer", "inspect", "demo", "Demo tasks created");
+    app_.record_computer_action(computer, "demo-agent", "computer", "deliver", "demo", "Sample playback available");
+    out_ << "Demo mode created " << created << " tasks and logged two computer events.\n";
+    return created > 0;
 }
 
 } // namespace luo_gate

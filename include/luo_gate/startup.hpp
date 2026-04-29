@@ -21,10 +21,15 @@ private:
     bool confirm(std::string_view label, bool default_yes = true);
     std::filesystem::path locate_luo_os_root(const std::filesystem::path& exe_path);
     void show_banner();
+    void show_capabilities();
+    void show_limitations();
+    void show_consent_notice();
+    bool offer_demo_mode();
 
     App& app_;
     std::istream& in_;
     std::ostream& out_;
+    bool first_run_ = false;
 };
 
 } // namespace luo_gate
