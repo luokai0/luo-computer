@@ -1,103 +1,357 @@
 #include "luo_gate/app.hpp"
+#include "luo_gate/platform.hpp"
 #include "luo_gate/security.hpp"
 
 #include <algorithm>
-#include <iomanip>
+#include <chrono>
+#include <fstream>
 #include <sstream>
 #include <utility>
 
 namespace luo_gate {
+namespace {
+std::vector<std::string> default_roles_for_kind(std::string_view kind) {
+    if (kind == "build") return {"planner", "builder", "reviewer", "tester", "operator"};
+    if (kind == "research") return {"researcher", "analyst", "writer"};
+    if (kind == "ops") return {"operator", "monitor", "safety"};
+    if (kind == "ui") return {"designer", "frontend", "tester"};
+    return {"planner", "operator", "reviewer"};
+}
 
-bool App::register_user(const std::string& username, const std::string& password, const std::string& email) {
-    if (!is_valid_username(username) || !is_valid_password(password)) {
-        return false;
-    }
-    if (users_.contains(username)) {
-        return false;
-    }
-    users_.emplace(username, User{username, password, email});
-    if (active_user_.empty()) {
-        active_user_ = username;
+std::string default_agent_id(std::size_t index) { return "agent-" + std::to_string(index + 1); }
+
+std::string default_agent_role(std::size_t index) {
+    static constexpr const char* roles[] = {"planner", "builder", "reviewer", "tester", "operator", "researcher", "designer", "writer", "monitor", "safety"};
+    return roles[index % (sizeof(roles) / sizeof(roles[0]))];
+}
+
+std::string project_output_preview(std::string_view command, std::string_view id) {
+    return "simulated run of '" + std::string(command) + "' for project " + std::string(id);
+}
+} // namespace
+
+App::App(std::filesystem::path data_root) : data_root_(data_root.empty() ? default_data_root() : std::move(data_root)) {
+    ensure_workspace_seeded();
+}
+
+bool App::load() {
+    ensure_workspace_seeded();
+    std::ifstream in(state_file());
+    if (!in) return false;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.rfind("user:", 0) == 0) active_user_ = line.substr(5);
     }
     return true;
 }
 
-bool App::login(const std::string& username, const std::string& password) {
-    const auto it = users_.find(username);
-    if (it == users_.end() || it->second.password != password) {
-        return false;
-    }
-    active_user_ = username;
+bool App::save() const {
+    std::error_code ec;
+    std::filesystem::create_directories(data_root_, ec);
+    std::ofstream out(state_file());
+    if (!out) return false;
+    out << export_state();
+    return true;
+}
+
+bool App::has_user(std::string_view username) const { return users_.contains(std::string(username)); }
+
+std::vector<std::string> App::users() const {
+    std::vector<std::string> out;
+    out.reserve(users_.size());
+    for (const auto& [name, _] : users_) out.push_back(name);
+    return out;
+}
+
+bool App::register_user(std::string username, std::string password, std::string email, ConsentFlags consent) {
+    if (!is_valid_username(username) || !is_valid_password(password)) return false;
+    if (users_.contains(username)) return false;
+    users_.emplace(username, UserRecord{username, password_hash(username, password), std::move(email), consent});
+    workspaces_.try_emplace(username, Workspace{consent});
+    if (active_user_.empty()) active_user_ = username;
+    record_audit(username, "register", "created account");
+    ensure_workspace_seeded();
+    touch();
+    return true;
+}
+
+bool App::login(std::string_view username, std::string_view password) {
+    const auto it = users_.find(std::string(username));
+    if (it == users_.end() || it->second.password_hash != password_hash(username, password)) return false;
+    active_user_ = it->first;
+    record_audit(active_user_, "login", "signed in");
+    ensure_workspace_seeded();
+    touch();
     return true;
 }
 
 void App::logout() {
+    if (!active_user_.empty()) record_audit(active_user_, "logout", "signed out");
     active_user_.clear();
 }
 
-bool App::authenticated() const {
-    return !active_user_.empty();
-}
+bool App::authenticated() const { return !active_user_.empty(); }
+std::string App::current_user() const { return active_user_; }
+ConsentFlags App::consent() const { return active_user_.empty() ? ConsentFlags{} : active_user_record().consent; }
 
-std::string App::current_user() const {
-    return active_user_;
-}
-
-void App::create_thread(const std::string& thread_id, const std::string& title) {
-    chats_.try_emplace(thread_id, ChatThread{thread_id, title, {}});
-}
-
-bool App::add_message(const std::string& thread_id, const std::string& author, const std::string& text) {
-    auto it = chats_.find(thread_id);
-    if (it == chats_.end()) {
-        return false;
-    }
-    it->second.messages.push_back(ChatMessage{author, text});
+bool App::set_consent(ConsentFlags consent) {
+    if (active_user_.empty()) return false;
+    active_user_record().consent = consent;
+    workspace().consent = consent;
+    record_audit(active_user_, "consent", "updated consent settings");
+    touch();
     return true;
 }
 
-std::vector<ChatThread> App::threads() const {
-    std::vector<ChatThread> out;
-    out.reserve(chats_.size());
-    for (const auto& [_, thread] : chats_) {
-        out.push_back(thread);
+bool App::add_agent(std::string id, std::string role, std::vector<std::string> expertise, int capacity) {
+    if (active_user_.empty()) return false;
+    auto& agents = workspace().agents;
+    if (std::any_of(agents.begin(), agents.end(), [&](const auto& a) { return a.id == id; })) return false;
+    agents.push_back(AgentProfile{std::move(id), std::move(role), std::move(expertise), capacity, false, {}});
+    touch();
+    return true;
+}
+
+bool App::create_task(std::string title, std::string description, std::string kind) {
+    if (active_user_.empty()) return false;
+    auto& ws = workspace();
+    TaskRecord task;
+    task.id = "task-" + std::to_string(ws.tasks.size() + 1);
+    task.title = std::move(title);
+    task.description = std::move(description);
+    task.kind = std::move(kind);
+    task.owner = active_user_;
+    task.created_at = now();
+    task.updated_at = task.created_at;
+    task.required_roles = default_roles_for_kind(task.kind);
+    task.plan = {{0, "system", "intake", "Accept and normalize user request", now()}, {1, "planner", "decompose", "Split into steps and assign roles", now()}, {2, "builder", "execute", "Perform the task in a visible computer session", now()}, {3, "reviewer", "verify", "Check output and correctness", now()}, {4, "operator", "deliver", "Return result to user", now()}};
+    task.assigned_agents = assign_agents(ws, task.required_roles, task.id);
+    ws.tasks.push_back(task);
+    record_trace("task", active_user_, "created", task.id + ":" + task.title);
+    touch();
+    return true;
+}
+
+bool App::tick() {
+    if (active_user_.empty()) return false;
+    auto& ws = workspace();
+    bool progressed = false;
+    for (auto& task : ws.tasks) {
+        if (task.status == "done" || task.plan.empty() || task.step_cursor >= task.plan.size()) continue;
+        auto& step = task.plan[task.step_cursor];
+        task.status = task.step_cursor + 1 >= task.plan.size() ? "done" : "running";
+        task.updated_at = now();
+        record_trace("task", step.actor, step.action, task.id + " -> " + step.detail);
+        task.step_cursor++;
+        if (task.status == "done") release_agents(ws, task);
+        progressed = true;
     }
-    std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.id < b.id; });
+    if (progressed) touch();
+    return progressed;
+}
+
+std::vector<TaskRecord> App::tasks() const { return active_user_.empty() ? std::vector<TaskRecord>{} : workspace().tasks; }
+
+std::vector<TaskStep> App::trace(std::size_t limit) const {
+    std::vector<TaskStep> out;
+    if (active_user_.empty()) return out;
+    for (const auto& t : workspace().tasks) for (const auto& s : t.plan) out.push_back(s);
+    if (out.size() > limit) out.erase(out.begin(), out.end() - static_cast<std::ptrdiff_t>(limit));
     return out;
 }
 
-void App::set_api_key(const std::string& service, const std::string& key) {
-    api_keys_[service] = key;
+std::vector<TraceEvent> App::trace_events(std::size_t limit) const {
+    auto out = active_user_.empty() ? std::vector<TraceEvent>{} : workspace().trace;
+    if (out.size() > limit) out.erase(out.begin(), out.end() - static_cast<std::ptrdiff_t>(limit));
+    return out;
 }
 
-std::unordered_map<std::string, std::string> App::api_keys() const {
-    return api_keys_; 
+std::size_t App::agent_count() const { return active_user_.empty() ? 0 : workspace().agents.size(); }
+
+std::vector<AgentProfile> App::agents(std::size_t limit) const {
+    std::vector<AgentProfile> out;
+    if (active_user_.empty()) return out;
+    out = workspace().agents;
+    if (out.size() > limit) out.erase(out.begin(), out.end() - static_cast<std::ptrdiff_t>(limit));
+    return out;
 }
 
-void App::upload_file(const std::string& name, const std::string& content) {
-    files_.push_back(FileRecord{name, content});
+std::map<std::string, std::size_t> App::role_counts() const {
+    std::map<std::string, std::size_t> counts;
+    if (active_user_.empty()) return counts;
+    for (const auto& a : workspace().agents) counts[a.role]++;
+    return counts;
 }
 
-std::vector<FileRecord> App::files() const {
-    return files_;
+bool App::set_secret(std::string service, std::string value, std::string scope) {
+    if (active_user_.empty()) return false;
+    auto& secrets = workspace().secrets;
+    auto it = std::find_if(secrets.begin(), secrets.end(), [&](const auto& s) { return s.service == service; });
+    SecretRecord record{service, value, scope};
+    if (it == secrets.end()) secrets.push_back(record);
+    else *it = record;
+    record_audit(active_user_, "secret", "stored secret for service");
+    touch();
+    return true;
 }
 
-void App::add_skill(const std::string& name, const std::string& description) {
-    skills_.push_back(SkillRecord{name, description});
+std::vector<SecretRecord> App::secrets() const { return active_user_.empty() ? std::vector<SecretRecord>{} : workspace().secrets; }
+
+bool App::upload_file(std::string name, std::string content) {
+    if (active_user_.empty()) return false;
+    workspace().files.push_back(FileRecord{std::move(name), std::move(content), now()});
+    record_audit(active_user_, "file", "uploaded file");
+    touch();
+    return true;
 }
 
-std::vector<SkillRecord> App::skills() const {
-    return skills_;
+std::vector<FileRecord> App::files() const { return active_user_.empty() ? std::vector<FileRecord>{} : workspace().files; }
+
+bool App::add_skill(std::string name, std::string description, std::vector<std::string> tags) {
+    if (active_user_.empty()) return false;
+    workspace().skills.push_back(SkillRecord{std::move(name), std::move(description), std::move(tags)});
+    touch();
+    return true;
+}
+
+std::vector<SkillRecord> App::skills() const { return active_user_.empty() ? std::vector<SkillRecord>{} : workspace().skills; }
+
+bool App::add_project(std::string id, std::string name, std::string command, std::string cwd, bool executable) {
+    if (active_user_.empty()) return false;
+    auto& projects = workspace().projects;
+    auto it = std::find_if(projects.begin(), projects.end(), [&](const auto& p) { return p.id == id; });
+    ProjectRecord record{std::move(id), std::move(name), std::move(command), std::move(cwd), executable, -1, {}};
+    if (it == projects.end()) projects.push_back(record);
+    else *it = record;
+    touch();
+    return true;
+}
+
+std::vector<ProjectRecord> App::projects() const { return active_user_.empty() ? std::vector<ProjectRecord>{} : workspace().projects; }
+
+bool App::link_device(std::string id, std::string label, std::vector<std::string> scopes, bool approved) {
+    if (active_user_.empty()) return false;
+    workspace().devices.push_back(DeviceLink{std::move(id), std::move(label), std::move(scopes), approved});
+    record_audit(active_user_, "device", "linked device");
+    touch();
+    return true;
+}
+
+std::vector<DeviceLink> App::devices() const { return active_user_.empty() ? std::vector<DeviceLink>{} : workspace().devices; }
+
+std::vector<TraceEvent> App::audit_log(std::size_t limit) const {
+    auto out = active_user_.empty() ? std::vector<TraceEvent>{} : workspace().audit;
+    if (out.size() > limit) out.erase(out.begin(), out.end() - static_cast<std::ptrdiff_t>(limit));
+    return out;
+}
+
+Summary App::summary() const {
+    Summary s;
+    s.user_count = users_.size();
+    s.active_user = active_user_;
+    s.platform = operating_system_name();
+    if (!active_user_.empty()) {
+        const auto& ws = workspace();
+        s.agent_count = ws.agents.size();
+        s.task_count = ws.tasks.size();
+        s.secret_count = ws.secrets.size();
+        s.file_count = ws.files.size();
+        s.skill_count = ws.skills.size();
+        s.project_count = ws.projects.size();
+        s.device_count = ws.devices.size();
+        s.audit_count = ws.audit.size();
+        s.role_counts = role_counts();
+    }
+    return s;
 }
 
 std::string App::export_state() const {
+    const auto s = summary();
     std::ostringstream out;
-    out << "{\"user\":\"" << active_user_ << "\",";
-    out << "\"users\":" << users_.size() << ",";
-    out << "\"threads\":" << chats_.size() << ",";
-    out << "\"files\":" << files_.size() << ",";
-    out << "\"skills\":" << skills_.size() << "}";
+    out << '{'
+        << "\"users\":" << s.user_count << ','
+        << "\"agents\":" << s.agent_count << ','
+        << "\"tasks\":" << s.task_count << ','
+        << "\"secrets\":" << s.secret_count << ','
+        << "\"files\":" << s.file_count << ','
+        << "\"skills\":" << s.skill_count << ','
+        << "\"projects\":" << s.project_count << ','
+        << "\"devices\":" << s.device_count << ','
+        << "\"audit\":" << s.audit_count << ','
+        << "\"platform\":\"" << json_escape(s.platform) << "\","
+        << "\"active_user\":\"" << json_escape(s.active_user) << "\"}";
     return out.str();
+}
+
+std::filesystem::path App::data_root() const { return data_root_; }
+
+Workspace& App::workspace() { return workspaces_[active_user_]; }
+const Workspace& App::workspace() const { return workspaces_.at(active_user_); }
+UserRecord& App::active_user_record() { return users_.at(active_user_); }
+const UserRecord& App::active_user_record() const { return users_.at(active_user_); }
+
+void App::ensure_workspace_seeded() {
+    for (auto& [user, ws] : workspaces_) {
+        if (ws.agents.empty()) seed_swarm(ws);
+    }
+}
+
+void App::seed_swarm(Workspace& ws) {
+    const std::vector<std::pair<std::string, std::vector<std::string>>> seeds = {{"planner", {"planning", "decomposition"}}, {"builder", {"implementation", "execution"}}, {"reviewer", {"validation", "quality"}}, {"tester", {"verification", "debugging"}}, {"operator", {"orchestration", "delivery"}}, {"researcher", {"research", "synthesis"}}, {"designer", {"ux", "layout"}}, {"writer", {"docs", "copy"}}, {"monitor", {"telemetry", "watching"}}, {"safety", {"consent", "policy"}}};
+    for (std::size_t i = 0; i < 10000; ++i) {
+        const auto& seed = seeds[i % seeds.size()];
+        ws.agents.push_back(AgentProfile{default_agent_id(i), default_agent_role(i) + "-" + seed.first, seed.second, 100, false, {}});
+    }
+}
+
+std::vector<std::string> App::roles_for_kind(std::string_view kind) const { return default_roles_for_kind(kind); }
+
+std::vector<std::string> App::assign_agents(Workspace& ws, const std::vector<std::string>& roles, const std::string& task_id) {
+    std::vector<std::string> assigned;
+    for (const auto& role : roles) {
+        auto it = std::find_if(ws.agents.begin(), ws.agents.end(), [&](const auto& a) { return !a.busy && a.role.find(role) != std::string::npos; });
+        if (it == ws.agents.end()) it = std::find_if(ws.agents.begin(), ws.agents.end(), [&](const auto& a) { return !a.busy; });
+        if (it != ws.agents.end()) {
+            it->busy = true;
+            it->task_id = task_id;
+            assigned.push_back(it->id);
+        }
+    }
+    return assigned;
+}
+
+void App::release_agents(Workspace& ws, const TaskRecord& task) {
+    for (auto& agent : ws.agents) {
+        if (agent.task_id == task.id) {
+            agent.busy = false;
+            agent.task_id.clear();
+        }
+    }
+}
+
+void App::record_trace(std::string category, std::string actor, std::string action, std::string detail) {
+    if (active_user_.empty()) return;
+    workspace().trace.push_back(TraceEvent{now(), std::move(category), std::move(actor), std::move(action), std::move(detail)});
+}
+
+void App::record_audit(std::string actor, std::string action, std::string detail) {
+    if (active_user_.empty()) return;
+    workspace().audit.push_back(TraceEvent{now(), "audit", std::move(actor), std::move(action), std::move(detail)});
+}
+
+void App::touch() {
+    if (auto_save_) save();
+}
+
+std::filesystem::path App::state_file() const { return data_root_ / "state.json"; }
+
+Timestamp App::now() {
+    return static_cast<Timestamp>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
+}
+
+bool App::add_trace(std::string category, std::string actor, std::string action, std::string detail) {
+    record_trace(std::move(category), std::move(actor), std::move(action), std::move(detail));
+    return true;
 }
 
 } // namespace luo_gate

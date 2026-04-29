@@ -1,77 +1,210 @@
 #pragma once
 
+#include <cstdint>
+#include <filesystem>
+#include <map>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 namespace luo_gate {
 
-struct User {
+using Timestamp = std::int64_t;
+
+struct ConsentFlags {
+    bool accept_terms = true;
+    bool allow_local_storage = true;
+    bool allow_files = true;
+    bool allow_chat_history = true;
+    bool allow_project_execution = false;
+    bool allow_device_links = false;
+    bool allow_analytics = false;
+};
+
+struct UserRecord {
     std::string username;
-    std::string password;
+    std::string password_hash;
     std::string email;
+    ConsentFlags consent;
 };
 
-struct ChatMessage {
-    std::string author;
-    std::string text;
+struct AgentProfile {
+    std::string id;
+    std::string role;
+    std::vector<std::string> expertise;
+    int capacity = 100;
+    bool busy = false;
+    std::string task_id;
 };
 
-struct ApiKeys {
-    std::unordered_map<std::string, std::string> values;
+struct TaskStep {
+    std::size_t index = 0;
+    std::string actor;
+    std::string action;
+    std::string detail;
+    Timestamp created_at = 0;
 };
 
-struct ChatThread {
+struct TaskRecord {
     std::string id;
     std::string title;
-    std::vector<ChatMessage> messages;
+    std::string description;
+    std::string kind;
+    std::string status = "queued";
+    std::string owner;
+    std::vector<std::string> required_roles;
+    std::vector<std::string> assigned_agents;
+    std::vector<TaskStep> plan;
+    std::size_t step_cursor = 0;
+    Timestamp created_at = 0;
+    Timestamp updated_at = 0;
+};
+
+struct SecretRecord {
+    std::string service;
+    std::string value;
+    std::string scope;
 };
 
 struct FileRecord {
     std::string name;
     std::string content;
+    Timestamp created_at = 0;
 };
 
 struct SkillRecord {
     std::string name;
     std::string description;
+    std::vector<std::string> tags;
+};
+
+struct ProjectRecord {
+    std::string id;
+    std::string name;
+    std::string command;
+    std::string cwd;
+    bool executable = false;
+    int last_exit_code = -1;
+    std::string last_output;
+};
+
+struct DeviceLink {
+    std::string id;
+    std::string label;
+    std::vector<std::string> scopes;
+    bool approved = false;
+};
+
+struct TraceEvent {
+    Timestamp created_at = 0;
+    std::string category;
+    std::string actor;
+    std::string action;
+    std::string detail;
+};
+
+struct Workspace {
+    ConsentFlags consent;
+    std::vector<AgentProfile> agents;
+    std::vector<TaskRecord> tasks;
+    std::vector<SecretRecord> secrets;
+    std::vector<FileRecord> files;
+    std::vector<SkillRecord> skills;
+    std::vector<ProjectRecord> projects;
+    std::vector<DeviceLink> devices;
+    std::vector<TraceEvent> trace;
+    std::vector<TraceEvent> audit;
+};
+
+struct Summary {
+    std::size_t user_count = 0;
+    std::size_t agent_count = 0;
+    std::size_t task_count = 0;
+    std::size_t secret_count = 0;
+    std::size_t file_count = 0;
+    std::size_t skill_count = 0;
+    std::size_t project_count = 0;
+    std::size_t device_count = 0;
+    std::size_t audit_count = 0;
+    std::string active_user;
+    std::string platform;
+    std::map<std::string, std::size_t> role_counts;
 };
 
 class App {
 public:
-    bool register_user(const std::string& username, const std::string& password, const std::string& email = {});
-    bool login(const std::string& username, const std::string& password);
+    explicit App(std::filesystem::path data_root = {});
+
+    bool load();
+    bool save() const;
+
+    bool has_user(std::string_view username) const;
+    std::vector<std::string> users() const;
+
+    bool register_user(std::string username, std::string password, std::string email = {}, ConsentFlags consent = {});
+    bool login(std::string_view username, std::string_view password);
     void logout();
+    bool authenticated() const;
+    std::string current_user() const;
 
-    [[nodiscard]] bool authenticated() const;
-    [[nodiscard]] std::string current_user() const;
+    ConsentFlags consent() const;
+    bool set_consent(ConsentFlags consent);
 
-    void create_thread(const std::string& thread_id, const std::string& title);
-    bool add_message(const std::string& thread_id, const std::string& author, const std::string& text);
-    [[nodiscard]] std::vector<ChatThread> threads() const;
+    bool add_agent(std::string id, std::string role, std::vector<std::string> expertise = {}, int capacity = 100);
+    bool create_task(std::string title, std::string description, std::string kind = "general");
+    bool tick();
+    std::vector<TaskRecord> tasks() const;
+    std::vector<TaskStep> trace(std::size_t limit = 120) const;
+    std::vector<TraceEvent> trace_events(std::size_t limit = 120) const;
 
-    void set_api_key(const std::string& service, const std::string& key);
-    [[nodiscard]] std::unordered_map<std::string, std::string> api_keys() const;
+    std::size_t agent_count() const;
+    std::vector<AgentProfile> agents(std::size_t limit = 200) const;
+    std::map<std::string, std::size_t> role_counts() const;
 
-    void upload_file(const std::string& name, const std::string& content);
-    [[nodiscard]] std::vector<FileRecord> files() const;
+    bool set_secret(std::string service, std::string value, std::string scope = "local");
+    std::vector<SecretRecord> secrets() const;
 
-    void add_skill(const std::string& name, const std::string& description);
-    [[nodiscard]] std::vector<SkillRecord> skills() const;
+    bool upload_file(std::string name, std::string content);
+    std::vector<FileRecord> files() const;
 
-    [[nodiscard]] std::string export_state() const;
+    bool add_skill(std::string name, std::string description, std::vector<std::string> tags = {});
+    std::vector<SkillRecord> skills() const;
+
+    bool add_project(std::string id, std::string name, std::string command, std::string cwd = {}, bool executable = true);
+    std::vector<ProjectRecord> projects() const;
+
+    bool link_device(std::string id, std::string label, std::vector<std::string> scopes = {}, bool approved = false);
+    std::vector<DeviceLink> devices() const;
+
+    std::vector<TraceEvent> audit_log(std::size_t limit = 200) const;
+    bool add_trace(std::string category, std::string actor, std::string action, std::string detail);
+    Summary summary() const;
+
+    std::string export_state() const;
+    std::filesystem::path data_root() const;
 
 private:
-    static bool valid_username(std::string_view username);
-    static bool valid_password(std::string_view password);
+    Workspace& workspace();
+    const Workspace& workspace() const;
+    UserRecord& active_user_record();
+    const UserRecord& active_user_record() const;
 
-    std::unordered_map<std::string, User> users_;
-    std::unordered_map<std::string, ChatThread> chats_;
-    std::unordered_map<std::string, std::string> api_keys_;
-    std::vector<FileRecord> files_;
-    std::vector<SkillRecord> skills_;
+    void ensure_workspace_seeded();
+    void seed_swarm(Workspace& ws);
+    std::vector<std::string> roles_for_kind(std::string_view kind) const;
+    std::vector<std::string> assign_agents(Workspace& ws, const std::vector<std::string>& roles, const std::string& task_id);
+    void release_agents(Workspace& ws, const TaskRecord& task);
+    void record_trace(std::string category, std::string actor, std::string action, std::string detail);
+    void record_audit(std::string actor, std::string action, std::string detail);
+    void touch();
+    std::filesystem::path state_file() const;
+    static Timestamp now();
+
+    std::filesystem::path data_root_;
+    std::map<std::string, UserRecord> users_;
+    std::map<std::string, Workspace> workspaces_;
     std::string active_user_;
+    bool auto_save_ = true;
 };
 
 } // namespace luo_gate
