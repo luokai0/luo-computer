@@ -34,10 +34,10 @@ It is cross-platform by design and stores its state in the user data directory.
 - [x] 7. Add a user settings profile with import/export and reset.
 - [x] 8. Add a proper home dashboard with summaries, shortcuts, and recent activity.
 - [x] 9. Add a task creation flow with templates for research, coding, browsing, and ops.
-- [ ] 10. Add a task history view with filters, search, and reopen/resume actions.
+- [x] 10. Add a task history view with filters, search, and reopen/resume actions.
 
 ### Agent system
-- [ ] 11. Replace synthetic seeded agents with real configurable agent records.
+- [x] 11. Replace synthetic seeded agents with real configurable agent records.
 - [ ] 12. Add agent skills, reliability, availability, and cost metadata.
 - [ ] 13. Add agent assignment logic based on role fit and current load.
 - [ ] 14. Add agent handoff between steps instead of a single linear tick.

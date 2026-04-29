@@ -276,6 +276,8 @@ private:
 
     void ensure_workspace_seeded();
     void seed_swarm(Workspace& ws);
+    bool seed_agents_from_config(Workspace& ws);
+    void seed_default_swarm(Workspace& ws);
     std::vector<std::string> roles_for_kind(std::string_view kind) const;
     std::vector<std::string> assign_agents(Workspace& ws, const std::vector<std::string>& roles, const std::string& task_id);
     void release_agents(Workspace& ws, const TaskRecord& task);

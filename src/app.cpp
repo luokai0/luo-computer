@@ -119,6 +119,14 @@ std::string join(const std::vector<std::string>& items, char delim) {
     return out.str();
 }
 
+std::string trim(std::string_view text) {
+    std::size_t start = 0;
+    std::size_t end = text.size();
+    while (start < end && std::isspace(static_cast<unsigned char>(text[start]))) start++;
+    while (end > start && std::isspace(static_cast<unsigned char>(text[end - 1]))) end--;
+    return std::string(text.substr(start, end - start));
+}
+
 ConsentFlags parse_consent(const std::vector<std::string>& fields) {
     ConsentFlags c;
     if (fields.size() >= 7) {
@@ -152,14 +160,6 @@ std::string rowify(const std::vector<std::string>& columns) {
         out << columns[i];
     }
     return out.str();
-}
-
-std::string trim(std::string_view text) {
-    auto begin = text.begin();
-    auto end = text.end();
-    while (begin != end && std::isspace(static_cast<unsigned char>(*begin))) ++begin;
-    while (end != begin && std::isspace(static_cast<unsigned char>(*(end - 1)))) --end;
-    return {begin, end};
 }
 
 } // namespace
@@ -551,6 +551,45 @@ void App::ensure_workspace_seeded() {
 }
 
 void App::seed_swarm(Workspace& ws) {
+    if (seed_agents_from_config(ws)) return;
+    seed_default_swarm(ws);
+}
+
+bool App::seed_agents_from_config(Workspace& ws) {
+    const auto file = data_root_ / "agents.csv";
+    std::ifstream in(file);
+    if (!in) return false;
+
+    std::string line;
+    std::size_t imported = 0;
+    while (std::getline(in, line)) {
+        const auto trimmed = trim(line);
+        if (trimmed.empty()) continue;
+        if (trimmed.rfind("#", 0) == 0) continue;
+        if (trimmed.find(',') == std::string::npos) continue;
+        if (trimmed.find("id,role") != std::string::npos) continue;
+        const auto parts = split(trimmed, ',');
+        if (parts.size() < 3) continue;
+        const auto id = trim(parts[0]);
+        const auto role = trim(parts[1]);
+        std::vector<std::string> expertise;
+        for (std::size_t i = 2; i < parts.size(); ++i) {
+            const auto entry = trim(parts[i]);
+            if (!entry.empty()) expertise.push_back(entry);
+        }
+        ws.agents.push_back(AgentProfile{id.empty() ? default_agent_id(imported) : id,
+                                         role.empty() ? default_agent_role(imported) : role,
+                                         expertise.empty() ? std::vector<std::string>{"skill"} : expertise,
+                                         100,
+                                         false,
+                                         {}});
+        imported++;
+    }
+
+    return imported > 0;
+}
+
+void App::seed_default_swarm(Workspace& ws) {
     const std::vector<std::pair<std::string, std::vector<std::string>>> seeds = {
         {"planner", {"planning", "decomposition"}},
         {"builder", {"implementation", "execution"}},
@@ -666,7 +705,15 @@ bool App::reset_workspace() {
     return true;
 }
 
-std::filesystem::path App::state_file() const { return data_root_ / "state.tsv"; }
+std::filesystem::path global_state_file(const App& app) {
+    return app.data_root_ / "state.tsv";
+}
+
+std::filesystem::path user_state_file(const App& app, std::string_view username) {
+    return app.data_root_ / "users" / (std::string(username) + ".tsv");
+}
+
+std::filesystem::path App::state_file() const { return global_state_file(*this); }
 
 bool StateIO::load_global(App& app) {
     std::ifstream in(app.state_file());
