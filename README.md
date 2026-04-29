@@ -12,6 +12,12 @@ LUO COMPUTER is the runtime where the LUO OS swarm works on a visible computer s
 - A cloned `luo_os/` tree inside the repo that the swarm imports and works against
 - Per-user secrets, files, skills, projects, and device links
 
+## How it starts
+- Click 1: launch `luo-computer`
+- Click 2: inside the app, press **Start Session**
+
+LUO OS is embedded inside the session workspace. It is not treated as a separate portable add-on.
+
 ## Current prototype
 The app is a C++20 core with a generated HTML dashboard and deterministic state model.
 It is cross-platform by design and stores its state in the user data directory.

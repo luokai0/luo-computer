@@ -19,6 +19,9 @@ int main() {
 
     assert(app.agent_count() == 10000);
     assert(app.computers().size() == 1);
+    assert(app.tasks().empty());
+    assert(app.luo_index_entries().empty());
+
     assert(app.attach_computer("desktop", "Desktop", "linux", {"computer", "browser", "terminal"}, true));
     assert(app.set_active_computer("desktop"));
     assert(app.create_task("Build swarm", "Break work into roles", "build"));
@@ -60,6 +63,8 @@ int main() {
         App saved(temp_root);
         assert(saved.register_user("Luo", "Gate"));
         assert(saved.login("Luo", "Gate"));
+        assert(saved.tasks().empty());
+        assert(saved.computers().size() == 1);
         assert(saved.attach_computer("desk", "Desk", "linux", {"computer", "browser"}, true));
         assert(saved.import_luo_os(luo_os_root));
         assert(saved.create_task("Persist", "Save and reload", "build"));
