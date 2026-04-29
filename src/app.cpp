@@ -18,15 +18,32 @@ std::vector<std::string> default_roles_for_kind(std::string_view kind) {
     return {"planner", "operator", "reviewer"};
 }
 
-std::string default_agent_id(std::size_t index) { return "agent-" + std::to_string(index + 1); }
+std::string default_agent_id(std::size_t index) {
+    return "agent-" + std::to_string(index + 1);
+}
 
 std::string default_agent_role(std::size_t index) {
     static constexpr const char* roles[] = {"planner", "builder", "reviewer", "tester", "operator", "researcher", "designer", "writer", "monitor", "safety"};
     return roles[index % (sizeof(roles) / sizeof(roles[0]))];
 }
 
-std::string project_output_preview(std::string_view command, std::string_view id) {
-    return "simulated run of '" + std::string(command) + "' for project " + std::string(id);
+std::string escape_json(std::string_view value) {
+    std::ostringstream out;
+    for (char c : value) {
+        switch (c) {
+            case '\\': out << "\\\\"; break;
+            case '"': out << "\\\""; break;
+            case '\n': out << "\\n"; break;
+            case '\r': out << "\\r"; break;
+            case '\t': out << "\\t"; break;
+            default: out << c; break;
+        }
+    }
+    return out.str();
+}
+
+std::string default_computer_id() {
+    return "local-computer";
 }
 } // namespace
 
@@ -40,7 +57,8 @@ bool App::load() {
     if (!in) return false;
     std::string line;
     while (std::getline(in, line)) {
-        if (line.rfind("user:", 0) == 0) active_user_ = line.substr(5);
+        if (line.rfind("active_user=", 0) == 0) active_user_ = line.substr(12);
+        if (line.rfind("computer=", 0) == 0) workspace().active_computer_id = line.substr(9);
     }
     return true;
 }
@@ -54,7 +72,9 @@ bool App::save() const {
     return true;
 }
 
-bool App::has_user(std::string_view username) const { return users_.contains(std::string(username)); }
+bool App::has_user(std::string_view username) const {
+    return users_.contains(std::string(username));
+}
 
 std::vector<std::string> App::users() const {
     std::vector<std::string> out;
@@ -69,8 +89,8 @@ bool App::register_user(std::string username, std::string password, std::string 
     users_.emplace(username, UserRecord{username, password_hash(username, password), std::move(email), consent});
     workspaces_.try_emplace(username, Workspace{consent});
     if (active_user_.empty()) active_user_ = username;
-    record_audit(username, "register", "created account");
     ensure_workspace_seeded();
+    record_audit(username, "register", "created account");
     touch();
     return true;
 }
@@ -79,8 +99,9 @@ bool App::login(std::string_view username, std::string_view password) {
     const auto it = users_.find(std::string(username));
     if (it == users_.end() || it->second.password_hash != password_hash(username, password)) return false;
     active_user_ = it->first;
-    record_audit(active_user_, "login", "signed in");
     ensure_workspace_seeded();
+    if (workspace().active_computer_id.empty()) workspace().active_computer_id = default_computer_id();
+    record_audit(active_user_, "login", "signed in");
     touch();
     return true;
 }
@@ -124,10 +145,18 @@ bool App::create_task(std::string title, std::string description, std::string ki
     task.created_at = now();
     task.updated_at = task.created_at;
     task.required_roles = default_roles_for_kind(task.kind);
-    task.plan = {{0, "system", "intake", "Accept and normalize user request", now()}, {1, "planner", "decompose", "Split into steps and assign roles", now()}, {2, "builder", "execute", "Perform the task in a visible computer session", now()}, {3, "reviewer", "verify", "Check output and correctness", now()}, {4, "operator", "deliver", "Return result to user", now()}};
+    task.plan = {
+        {0, "system", "intake", "Accept and normalize user request", now(), "computer"},
+        {1, "planner", "decompose", "Split the task into steps and roles", now(), "computer"},
+        {2, "operator", "open", "Open the computer and visible workspace", now(), "computer"},
+        {3, "builder", "execute", "Perform the requested action on the computer", now(), "computer"},
+        {4, "reviewer", "verify", "Check results for correctness", now(), "computer"},
+        {5, "operator", "deliver", "Show the result to the user", now(), "computer"},
+    };
     task.assigned_agents = assign_agents(ws, task.required_roles, task.id);
     ws.tasks.push_back(task);
     record_trace("task", active_user_, "created", task.id + ":" + task.title);
+    record_computer_action(ws.active_computer_id.empty() ? default_computer_id() : ws.active_computer_id, "system", "computer", "open", task.id, "Spawned visible task on the local computer");
     touch();
     return true;
 }
@@ -138,10 +167,11 @@ bool App::tick() {
     bool progressed = false;
     for (auto& task : ws.tasks) {
         if (task.status == "done" || task.plan.empty() || task.step_cursor >= task.plan.size()) continue;
-        auto& step = task.plan[task.step_cursor];
+        auto step = task.plan[task.step_cursor];
         task.status = task.step_cursor + 1 >= task.plan.size() ? "done" : "running";
         task.updated_at = now();
         record_trace("task", step.actor, step.action, task.id + " -> " + step.detail);
+        record_computer_action(ws.active_computer_id.empty() ? default_computer_id() : ws.active_computer_id, step.actor, step.surface, step.action, task.id, step.detail);
         task.step_cursor++;
         if (task.status == "done") release_agents(ws, task);
         progressed = true;
@@ -150,12 +180,16 @@ bool App::tick() {
     return progressed;
 }
 
-std::vector<TaskRecord> App::tasks() const { return active_user_.empty() ? std::vector<TaskRecord>{} : workspace().tasks; }
+std::vector<TaskRecord> App::tasks() const {
+    return active_user_.empty() ? std::vector<TaskRecord>{} : workspace().tasks;
+}
 
 std::vector<TaskStep> App::trace(std::size_t limit) const {
     std::vector<TaskStep> out;
     if (active_user_.empty()) return out;
-    for (const auto& t : workspace().tasks) for (const auto& s : t.plan) out.push_back(s);
+    for (const auto& task : workspace().tasks) {
+        for (const auto& step : task.plan) out.push_back(step);
+    }
     if (out.size() > limit) out.erase(out.begin(), out.end() - static_cast<std::ptrdiff_t>(limit));
     return out;
 }
@@ -166,7 +200,9 @@ std::vector<TraceEvent> App::trace_events(std::size_t limit) const {
     return out;
 }
 
-std::size_t App::agent_count() const { return active_user_.empty() ? 0 : workspace().agents.size(); }
+std::size_t App::agent_count() const {
+    return active_user_.empty() ? 0 : workspace().agents.size();
+}
 
 std::vector<AgentProfile> App::agents(std::size_t limit) const {
     std::vector<AgentProfile> out;
@@ -179,15 +215,55 @@ std::vector<AgentProfile> App::agents(std::size_t limit) const {
 std::map<std::string, std::size_t> App::role_counts() const {
     std::map<std::string, std::size_t> counts;
     if (active_user_.empty()) return counts;
-    for (const auto& a : workspace().agents) counts[a.role]++;
+    for (const auto& agent : workspace().agents) counts[agent.role]++;
     return counts;
+}
+
+bool App::attach_computer(std::string id, std::string label, std::string os, std::vector<std::string> surfaces, bool active) {
+    if (active_user_.empty()) return false;
+    auto& computers = workspace().computers;
+    auto it = std::find_if(computers.begin(), computers.end(), [&](const auto& c) { return c.id == id; });
+    ComputerRecord record{std::move(id), std::move(label), std::move(os), std::move(surfaces), active};
+    if (it == computers.end()) computers.push_back(record);
+    else *it = record;
+    if (workspace().active_computer_id.empty() || active) workspace().active_computer_id = record.id;
+    record_computer_action(record.id, "system", "computer", "attach", record.label, "Computer attached to the swarm workspace");
+    touch();
+    return true;
+}
+
+bool App::set_active_computer(std::string_view id) {
+    if (active_user_.empty()) return false;
+    auto& computers = workspace().computers;
+    auto it = std::find_if(computers.begin(), computers.end(), [&](const auto& c) { return c.id == id; });
+    if (it == computers.end()) return false;
+    workspace().active_computer_id = it->id;
+    record_computer_action(it->id, "system", "computer", "focus", it->label, "User switched to this computer");
+    touch();
+    return true;
+}
+
+std::vector<ComputerRecord> App::computers() const {
+    return active_user_.empty() ? std::vector<ComputerRecord>{} : workspace().computers;
+}
+
+std::vector<ComputerAction> App::computer_log(std::size_t limit) const {
+    auto out = active_user_.empty() ? std::vector<ComputerAction>{} : workspace().computer_log;
+    if (out.size() > limit) out.erase(out.begin(), out.end() - static_cast<std::ptrdiff_t>(limit));
+    return out;
+}
+
+bool App::record_computer_action(std::string computer_id, std::string agent_id, std::string surface, std::string verb, std::string target, std::string detail) {
+    if (active_user_.empty()) return false;
+    workspace().computer_log.push_back(ComputerAction{now(), std::move(computer_id), std::move(agent_id), std::move(surface), std::move(verb), std::move(target), std::move(detail)});
+    return true;
 }
 
 bool App::set_secret(std::string service, std::string value, std::string scope) {
     if (active_user_.empty()) return false;
     auto& secrets = workspace().secrets;
     auto it = std::find_if(secrets.begin(), secrets.end(), [&](const auto& s) { return s.service == service; });
-    SecretRecord record{service, value, scope};
+    SecretRecord record{std::move(service), std::move(value), std::move(scope)};
     if (it == secrets.end()) secrets.push_back(record);
     else *it = record;
     record_audit(active_user_, "secret", "stored secret for service");
@@ -195,7 +271,9 @@ bool App::set_secret(std::string service, std::string value, std::string scope) 
     return true;
 }
 
-std::vector<SecretRecord> App::secrets() const { return active_user_.empty() ? std::vector<SecretRecord>{} : workspace().secrets; }
+std::vector<SecretRecord> App::secrets() const {
+    return active_user_.empty() ? std::vector<SecretRecord>{} : workspace().secrets;
+}
 
 bool App::upload_file(std::string name, std::string content) {
     if (active_user_.empty()) return false;
@@ -205,7 +283,9 @@ bool App::upload_file(std::string name, std::string content) {
     return true;
 }
 
-std::vector<FileRecord> App::files() const { return active_user_.empty() ? std::vector<FileRecord>{} : workspace().files; }
+std::vector<FileRecord> App::files() const {
+    return active_user_.empty() ? std::vector<FileRecord>{} : workspace().files;
+}
 
 bool App::add_skill(std::string name, std::string description, std::vector<std::string> tags) {
     if (active_user_.empty()) return false;
@@ -214,7 +294,9 @@ bool App::add_skill(std::string name, std::string description, std::vector<std::
     return true;
 }
 
-std::vector<SkillRecord> App::skills() const { return active_user_.empty() ? std::vector<SkillRecord>{} : workspace().skills; }
+std::vector<SkillRecord> App::skills() const {
+    return active_user_.empty() ? std::vector<SkillRecord>{} : workspace().skills;
+}
 
 bool App::add_project(std::string id, std::string name, std::string command, std::string cwd, bool executable) {
     if (active_user_.empty()) return false;
@@ -227,7 +309,9 @@ bool App::add_project(std::string id, std::string name, std::string command, std
     return true;
 }
 
-std::vector<ProjectRecord> App::projects() const { return active_user_.empty() ? std::vector<ProjectRecord>{} : workspace().projects; }
+std::vector<ProjectRecord> App::projects() const {
+    return active_user_.empty() ? std::vector<ProjectRecord>{} : workspace().projects;
+}
 
 bool App::link_device(std::string id, std::string label, std::vector<std::string> scopes, bool approved) {
     if (active_user_.empty()) return false;
@@ -237,7 +321,9 @@ bool App::link_device(std::string id, std::string label, std::vector<std::string
     return true;
 }
 
-std::vector<DeviceLink> App::devices() const { return active_user_.empty() ? std::vector<DeviceLink>{} : workspace().devices; }
+std::vector<DeviceLink> App::devices() const {
+    return active_user_.empty() ? std::vector<DeviceLink>{} : workspace().devices;
+}
 
 std::vector<TraceEvent> App::audit_log(std::size_t limit) const {
     auto out = active_user_.empty() ? std::vector<TraceEvent>{} : workspace().audit;
@@ -254,6 +340,7 @@ Summary App::summary() const {
         const auto& ws = workspace();
         s.agent_count = ws.agents.size();
         s.task_count = ws.tasks.size();
+        s.computer_count = ws.computers.size();
         s.secret_count = ws.secrets.size();
         s.file_count = ws.files.size();
         s.skill_count = ws.skills.size();
@@ -272,14 +359,15 @@ std::string App::export_state() const {
         << "\"users\":" << s.user_count << ','
         << "\"agents\":" << s.agent_count << ','
         << "\"tasks\":" << s.task_count << ','
+        << "\"computers\":" << s.computer_count << ','
         << "\"secrets\":" << s.secret_count << ','
         << "\"files\":" << s.file_count << ','
         << "\"skills\":" << s.skill_count << ','
         << "\"projects\":" << s.project_count << ','
         << "\"devices\":" << s.device_count << ','
         << "\"audit\":" << s.audit_count << ','
-        << "\"platform\":\"" << json_escape(s.platform) << "\","
-        << "\"active_user\":\"" << json_escape(s.active_user) << "\"}";
+        << "\"platform\":\"" << escape_json(s.platform) << "\","
+        << "\"active_user\":\"" << escape_json(s.active_user) << "\"}";
     return out.str();
 }
 
@@ -293,11 +381,24 @@ const UserRecord& App::active_user_record() const { return users_.at(active_user
 void App::ensure_workspace_seeded() {
     for (auto& [user, ws] : workspaces_) {
         if (ws.agents.empty()) seed_swarm(ws);
+        if (ws.computers.empty()) ws.computers.push_back(ComputerRecord{default_computer_id(), "Local Computer", operating_system_name(), {"computer", "terminal", "browser", "files"}, true});
+        if (ws.active_computer_id.empty()) ws.active_computer_id = ws.computers.front().id;
     }
 }
 
 void App::seed_swarm(Workspace& ws) {
-    const std::vector<std::pair<std::string, std::vector<std::string>>> seeds = {{"planner", {"planning", "decomposition"}}, {"builder", {"implementation", "execution"}}, {"reviewer", {"validation", "quality"}}, {"tester", {"verification", "debugging"}}, {"operator", {"orchestration", "delivery"}}, {"researcher", {"research", "synthesis"}}, {"designer", {"ux", "layout"}}, {"writer", {"docs", "copy"}}, {"monitor", {"telemetry", "watching"}}, {"safety", {"consent", "policy"}}};
+    const std::vector<std::pair<std::string, std::vector<std::string>>> seeds = {
+        {"planner", {"planning", "decomposition"}},
+        {"builder", {"implementation", "execution"}},
+        {"reviewer", {"validation", "quality"}},
+        {"tester", {"verification", "debugging"}},
+        {"operator", {"orchestration", "delivery"}},
+        {"researcher", {"research", "synthesis"}},
+        {"designer", {"ux", "layout"}},
+        {"writer", {"docs", "copy"}},
+        {"monitor", {"telemetry", "watching"}},
+        {"safety", {"consent", "policy"}},
+    };
     for (std::size_t i = 0; i < 10000; ++i) {
         const auto& seed = seeds[i % seeds.size()];
         ws.agents.push_back(AgentProfile{default_agent_id(i), default_agent_role(i) + "-" + seed.first, seed.second, 100, false, {}});
@@ -343,7 +444,7 @@ void App::touch() {
     if (auto_save_) save();
 }
 
-std::filesystem::path App::state_file() const { return data_root_ / "state.json"; }
+std::filesystem::path App::state_file() const { return data_root_ / "state.txt"; }
 
 Timestamp App::now() {
     return static_cast<Timestamp>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));

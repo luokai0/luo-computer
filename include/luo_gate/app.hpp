@@ -43,6 +43,7 @@ struct TaskStep {
     std::string action;
     std::string detail;
     Timestamp created_at = 0;
+    std::string surface = "computer";
 };
 
 struct TaskRecord {
@@ -58,6 +59,24 @@ struct TaskRecord {
     std::size_t step_cursor = 0;
     Timestamp created_at = 0;
     Timestamp updated_at = 0;
+};
+
+struct ComputerRecord {
+    std::string id;
+    std::string label;
+    std::string os;
+    std::vector<std::string> surfaces;
+    bool active = true;
+};
+
+struct ComputerAction {
+    Timestamp created_at = 0;
+    std::string computer_id;
+    std::string agent_id;
+    std::string surface;
+    std::string verb;
+    std::string target;
+    std::string detail;
 };
 
 struct SecretRecord {
@@ -107,6 +126,9 @@ struct Workspace {
     ConsentFlags consent;
     std::vector<AgentProfile> agents;
     std::vector<TaskRecord> tasks;
+    std::vector<ComputerRecord> computers;
+    std::string active_computer_id;
+    std::vector<ComputerAction> computer_log;
     std::vector<SecretRecord> secrets;
     std::vector<FileRecord> files;
     std::vector<SkillRecord> skills;
@@ -120,6 +142,7 @@ struct Summary {
     std::size_t user_count = 0;
     std::size_t agent_count = 0;
     std::size_t task_count = 0;
+    std::size_t computer_count = 0;
     std::size_t secret_count = 0;
     std::size_t file_count = 0;
     std::size_t skill_count = 0;
@@ -160,6 +183,12 @@ public:
     std::size_t agent_count() const;
     std::vector<AgentProfile> agents(std::size_t limit = 200) const;
     std::map<std::string, std::size_t> role_counts() const;
+
+    bool attach_computer(std::string id, std::string label, std::string os = {}, std::vector<std::string> surfaces = {}, bool active = true);
+    bool set_active_computer(std::string_view id);
+    std::vector<ComputerRecord> computers() const;
+    std::vector<ComputerAction> computer_log(std::size_t limit = 200) const;
+    bool record_computer_action(std::string computer_id, std::string agent_id, std::string surface, std::string verb, std::string target, std::string detail);
 
     bool set_secret(std::string service, std::string value, std::string scope = "local");
     std::vector<SecretRecord> secrets() const;

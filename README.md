@@ -1,14 +1,16 @@
-# LUO GATE
+# LUO COMPUTER
 
-LUO GATE is a private, consent-based multi-user app prototype.
+LUO COMPUTER is the runtime where the LUO OS swarm works on a visible computer surface.
+
+## What it does
+- 3-6 letter usernames only
+- Consent-first onboarding
+- 10,000 seeded agents split into roles and expertise
+- Tasks that decompose into visible steps
+- A local computer record with browser / terminal / files / computer surfaces
+- A visible action log so the user can watch what the swarm is doing
+- Per-user secrets, files, skills, projects, and device links
 
 ## Current prototype
-- Username/password accounts with usernames limited to 3-6 letters
-- A shared chat space per account
-- Per-user API key storage
-- File uploads and shared skills records
-- Simple text UI screens for the app flow
-
-## Notes
-This first version intentionally avoids hidden surveillance, unrestricted device access, or secret logging.
-It is a foundation for the product you described, not the full platform yet.
+The app is a C++20 core with a generated HTML dashboard and deterministic state model.
+It is cross-platform by design and stores its state in the user data directory.

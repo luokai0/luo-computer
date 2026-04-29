@@ -17,7 +17,9 @@ int main() {
     assert(app.login("Luo", "Gate"));
 
     assert(app.agent_count() == 10000);
-    assert(app.add_agent("chief", "planner", {"coordination"}, 100));
+    assert(app.computers().size() == 1);
+    assert(app.attach_computer("desktop", "Desktop", "linux", {"computer", "browser", "terminal"}, true));
+    assert(app.set_active_computer("desktop"));
     assert(app.create_task("Build swarm", "Break work into roles", "build"));
     assert(app.tick());
 
@@ -31,6 +33,7 @@ int main() {
     assert(summary.user_count == 1);
     assert(summary.agent_count >= 10000);
     assert(summary.task_count == 1);
+    assert(summary.computer_count >= 1);
     assert(summary.secret_count == 1);
     assert(summary.file_count == 1);
     assert(summary.skill_count == 1);
@@ -41,6 +44,7 @@ int main() {
     assert(state.find("\"users\":1") != std::string::npos);
     assert(state.find("\"agents\":") != std::string::npos);
     assert(state.find("\"tasks\":1") != std::string::npos);
+    assert(state.find("\"computers\":") != std::string::npos);
 
     std::cout << "luo-computer tests passed\n";
     return 0;

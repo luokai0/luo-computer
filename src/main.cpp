@@ -11,7 +11,7 @@ int main(int argc, char** argv) {
         app.register_user("Luo", "Gate", {}, ConsentFlags{});
     }
     app.login("Luo", "Gate");
-    app.add_skill("orchestrate", "Agent swarm orchestration");
+    app.attach_computer("local", "Local Computer", "luo-os", {"computer", "browser", "terminal", "files"}, true);
     app.create_task("Bootstrap swarm", "Create the first visible swarm with roles and jobs", "bootstrap");
     app.tick();
     app.save();
