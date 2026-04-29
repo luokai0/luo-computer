@@ -28,7 +28,7 @@ It is cross-platform by design and stores its state in the user data directory.
 - [x] 1. Replace the placeholder startup flow with a real end-to-end launch sequence.
 - [x] 2. Add a true session state machine with idle, starting, running, paused, failed, and resumed states.
 - [x] 3. Persist every user-visible action across restarts without losing the timeline.
-- [ ] 4. Add a real multi-user boundary so each account is isolated by design.
+- [x] 4. Add a real multi-user boundary so each account is isolated by design.
 - [x] 5. Make the onboarding flow explain exactly what the system can and cannot do.
 - [x] 6. Add a first-run demo mode with sample agents, tasks, and computer activity.
 - [x] 7. Add a user settings profile with import/export and reset.
