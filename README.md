@@ -21,3 +21,6 @@ LUO OS is embedded inside the session workspace. It is not treated as a separate
 ## Current prototype
 The app is a C++20 core with a generated HTML dashboard and deterministic state model.
 It is cross-platform by design and stores its state in the user data directory.
+
+## Working plan
+- `file 'docs/luo-computer-10-step-plan.md'`

@@ -51,6 +51,21 @@ void append_luo_index(std::ostringstream& out, const App& app) {
     out << "</div>";
 }
 
+void append_luo_tree(std::ostringstream& out, const App& app) {
+    out << "<div class='list'>";
+    const auto top = app.search_luo_os("", 200);
+    std::string last_group;
+    for (const auto& entry : top) {
+        const auto slash = entry.path.find('/');
+        const auto group = slash == std::string::npos ? entry.path : entry.path.substr(0, slash);
+        if (group != last_group) {
+            last_group = group;
+            out << "<div class='pill' style='background:#2e6b8a'>" << group << "</div>";
+        }
+    }
+    out << "</div>";
+}
+
 void append_trace(std::ostringstream& out, const App& app) {
     out << "<div class='trace'>";
     for (const auto& e : app.trace_events(24)) {
@@ -89,6 +104,8 @@ std::string render_dashboard_html(const App& app) {
     append_tasks(out, app);
     out << "<h3>Computer surfaces</h3>";
     append_computers(out, app);
+    out << "<h3>LUO OS tree</h3>";
+    append_luo_tree(out, app);
     out << "<h3>LUO OS index</h3>";
     append_luo_index(out, app);
     out << "</section><section class='card'><h3>Vault</h3><p>Secrets: " << s.secret_count << "</p><p>Files: " << s.file_count << "</p><p>Skills: " << s.skill_count << "</p></section></div>";
