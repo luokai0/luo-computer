@@ -25,6 +25,7 @@ private:
     void show_limitations();
     void show_consent_notice();
     bool offer_demo_mode();
+    bool task_creation_flow();
 
     App& app_;
     std::istream& in_;

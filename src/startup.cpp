@@ -43,6 +43,8 @@ int StartupFlow::run(int port, const std::filesystem::path& exe_path) {
         first_run_ = false;
     }
 
+    task_creation_flow();
+
     out_ << "Launching LUO COMPUTER on port " << port << "...\n";
     return run_server(app_, port);
 }
@@ -190,6 +192,25 @@ bool StartupFlow::offer_demo_mode() {
     app_.record_computer_action(computer, "demo-agent", "computer", "deliver", "demo", "Sample playback available");
     out_ << "Demo mode created " << created << " tasks and logged two computer events.\n";
     return created > 0;
+}
+
+bool StartupFlow::task_creation_flow() {
+    if (!confirm("Create a templated task now?", false)) {
+        return false;
+    }
+    const auto category = prompt_line("Task category (research/coding/ops)", "research");
+    const auto template_text = prompt_line("Optional brief", "");
+    const auto title = category == "coding" ? "Fix critical bug" : category == "ops" ? "Orchestrate deployment" : "Investigate user request";
+    const auto description = template_text.empty()
+        ? (category == "coding" ? "Review the repo, reproduce the issue, and ship a fix." : category == "ops" ? "Coordinate systems to roll out the update safely." : "Gather facts, search docs, and summarize next steps.")
+        : template_text;
+    if (!app_.create_task(title, description, category)) {
+        out_ << "Could not create task.\n";
+        return false;
+    }
+    app_.record_trace("task", "planner", "templated", title + ": " + category);
+    out_ << "Created templated task: " << title << "\n";
+    return true;
 }
 
 } // namespace luo_gate
