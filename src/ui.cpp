@@ -192,10 +192,16 @@ void append_trace(std::ostringstream& out, const App& app) {
     out << "</div>";
 }
 
-void append_computer_log(std::ostringstream& out, const App& app) {
+void append_computer_playback(std::ostringstream& out, const App& app) {
     out << "<div class='trace'>";
-    for (const auto& a : app.computer_log(24)) {
-        out << "<div><strong>" << html_escape(a.agent_id) << "</strong> on <em>" << html_escape(a.surface) << "</em> " << html_escape(a.verb) << " " << html_escape(a.target) << " — " << html_escape(a.detail) << "</div>";
+    const auto log = app.computer_log(24);
+    for (std::size_t i = 0; i < log.size(); ++i) {
+        const auto& a = log[i];
+        out << "<div class='pill'>Playback " << (i + 1) << ". " << html_escape(a.agent_id) << " on " << html_escape(a.surface)
+            << " · " << html_escape(a.verb) << " " << html_escape(a.target) << " — " << html_escape(a.detail) << "</div>";
+    }
+    if (log.empty()) {
+        out << "<div class='pill'>No computer activity yet.</div>";
     }
     out << "</div>";
 }
@@ -231,8 +237,8 @@ std::string render_dashboard_html(const App& app) {
     out << "</section><section class='card'><h3>Vault</h3><p>Secrets: " << s.secret_count << "</p><p>Files: " << s.file_count << "</p><p>Skills: " << s.skill_count << "</p></section></div>";
     out << "<section class='card' style='margin-top:16px'><h3>Visible trace</h3>";
     append_trace(out, app);
-    out << "<h3>Computer actions</h3>";
-    append_computer_log(out, app);
+    out << "<h3>Computer Playback</h3><p>computer actions timeline</p>";
+    append_computer_playback(out, app);
     out << "</section></body></html>";
     return out.str();
 }

@@ -1,5 +1,6 @@
 #include "luo_gate/app.hpp"
 #include "luo_gate/security.hpp"
+#include "luo_gate/ui.hpp"
 
 #include <cassert>
 #include <filesystem>
@@ -50,6 +51,12 @@ int main() {
     assert(summary.skill_count == 1);
     assert(summary.project_count == 1);
     assert(summary.device_count == 1);
+
+    const auto html = render_dashboard_html(app);
+    assert(html.find("Task inspector") != std::string::npos);
+    assert(html.find("Playback") != std::string::npos || html.find("computer actions") != std::string::npos);
+    assert(html.find("LUO OS tree") != std::string::npos);
+    assert(html.find("LUO OS index") != std::string::npos);
 
     const auto state = app.export_state();
     assert(state.find("\"users\":1") != std::string::npos);
