@@ -215,6 +215,7 @@ public:
 
 private:
     friend struct StateIO;
+    friend struct StateStore;
 
     Workspace& workspace();
     const Workspace& workspace() const;

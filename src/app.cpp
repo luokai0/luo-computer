@@ -2,6 +2,7 @@
 #include "luo_gate/platform.hpp"
 #include "luo_gate/security.hpp"
 #include "luo_gate/state_io.hpp"
+#include "luo_gate/state_store.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -138,9 +139,9 @@ App::App(std::filesystem::path data_root) : data_root_(data_root.empty() ? defau
     ensure_workspace_seeded();
 }
 
-bool App::load() { return StateIO::load(*this); }
+bool App::load() { return StateStore::load(*this); }
 
-bool App::save() const { return StateIO::save(*this); }
+bool App::save() const { return StateStore::save(*this); }
 
 bool App::has_user(std::string_view username) const {
     return users_.contains(std::string(username));
