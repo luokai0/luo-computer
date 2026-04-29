@@ -7,11 +7,13 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <utility>
 #include <string_view>
+#include <optional>
 
 namespace luo_gate {
 namespace {
@@ -160,6 +162,48 @@ std::string rowify(const std::vector<std::string>& columns) {
         out << columns[i];
     }
     return out.str();
+}
+
+std::optional<AgentProfile> parse_agent_line(std::string_view line) {
+    const auto trimmed = trim(line);
+    if (trimmed.empty() || trimmed.rfind("#", 0) == 0) return std::nullopt;
+    if (trimmed.find(',') == std::string::npos) return std::nullopt;
+    const auto parts = split(trimmed, ',');
+    if (parts.size() < 3) return std::nullopt;
+
+    const auto id = trim(parts[0]);
+    const auto role = trim(parts[1]);
+    std::vector<std::string> expertise;
+    for (std::size_t i = 2; i < parts.size(); ++i) {
+        const auto entry = trim(parts[i]);
+        if (!entry.empty()) expertise.push_back(entry);
+    }
+
+    double reliability = 0.8;
+    std::string availability = "always";
+    double cost = 1.0;
+    if (parts.size() >= 6) {
+        try {
+            reliability = std::clamp(std::stod(trim(parts[3])), 0.0, 1.0);
+        } catch (...) {}
+        const auto avail = trim(parts[4]);
+        if (!avail.empty()) availability = avail;
+        try {
+            cost = std::max(0.0, std::stod(trim(parts[5])));
+        } catch (...) {}
+    }
+
+    return AgentProfile{
+        id.empty() ? default_agent_id(0) : id,
+        role.empty() ? default_agent_role(0) : role,
+        expertise.empty() ? std::vector<std::string>{"general"} : expertise,
+        100,
+        false,
+        {},
+        reliability,
+        availability,
+        cost
+    };
 }
 
 } // namespace
@@ -561,36 +605,18 @@ bool App::seed_agents_from_config(Workspace& ws) {
     if (!in) return false;
 
     std::string line;
-    std::size_t imported = 0;
+    std::size_t count = 0;
     while (std::getline(in, line)) {
-        const auto trimmed = trim(line);
-        if (trimmed.empty()) continue;
-        if (trimmed.rfind("#", 0) == 0) continue;
-        if (trimmed.find(',') == std::string::npos) continue;
-        if (trimmed.find("id,role") != std::string::npos) continue;
-        const auto parts = split(trimmed, ',');
-        if (parts.size() < 3) continue;
-        const auto id = trim(parts[0]);
-        const auto role = trim(parts[1]);
-        std::vector<std::string> expertise;
-        for (std::size_t i = 2; i < parts.size(); ++i) {
-            const auto entry = trim(parts[i]);
-            if (!entry.empty()) expertise.push_back(entry);
+        if (const auto profile = parse_agent_line(line)) {
+            ws.agents.push_back(*profile);
+            count++;
         }
-        ws.agents.push_back(AgentProfile{id.empty() ? default_agent_id(imported) : id,
-                                         role.empty() ? default_agent_role(imported) : role,
-                                         expertise.empty() ? std::vector<std::string>{"skill"} : expertise,
-                                         100,
-                                         false,
-                                         {}});
-        imported++;
     }
-
-    return imported > 0;
+    return count > 0;
 }
 
 void App::seed_default_swarm(Workspace& ws) {
-    const std::vector<std::pair<std::string, std::vector<std::string>>> seeds = {
+    const auto seeds = std::vector<std::pair<std::string, std::vector<std::string>>>{
         {"planner", {"planning", "decomposition"}},
         {"builder", {"implementation", "execution"}},
         {"reviewer", {"validation", "quality"}},
@@ -604,7 +630,8 @@ void App::seed_default_swarm(Workspace& ws) {
     };
     for (std::size_t i = 0; i < 10000; ++i) {
         const auto& seed = seeds[i % seeds.size()];
-        ws.agents.push_back(AgentProfile{default_agent_id(i), default_agent_role(i) + "-" + seed.first, seed.second, 100, false, {}});
+        const double reliability = 0.92 - (static_cast<double>(i % seeds.size()) * 0.004);
+        ws.agents.push_back(AgentProfile{default_agent_id(i), default_agent_role(i) + "-" + seed.first, seed.second, 100, false, {}, reliability, "always", 1.0});
     }
 }
 
@@ -613,13 +640,29 @@ std::vector<std::string> App::roles_for_kind(std::string_view kind) const { retu
 std::vector<std::string> App::assign_agents(Workspace& ws, const std::vector<std::string>& roles, const std::string& task_id) {
     std::vector<std::string> assigned;
     for (const auto& role : roles) {
-        auto it = std::find_if(ws.agents.begin(), ws.agents.end(), [&](const auto& a) { return !a.busy && a.role.find(role) != std::string::npos; });
-        if (it == ws.agents.end()) it = std::find_if(ws.agents.begin(), ws.agents.end(), [&](const auto& a) { return !a.busy; });
-        if (it != ws.agents.end()) {
-            it->busy = true;
-            it->task_id = task_id;
-            assigned.push_back(it->id);
+        auto best_it = ws.agents.end();
+        double best_reliability = -1.0;
+        for (auto it = ws.agents.begin(); it != ws.agents.end(); ++it) {
+            if (it->busy) continue;
+            if (it->role.find(role) == std::string::npos) continue;
+            if (it->reliability > best_reliability) {
+                best_reliability = it->reliability;
+                best_it = it;
+            }
         }
+        if (best_it == ws.agents.end()) {
+            for (auto it = ws.agents.begin(); it != ws.agents.end(); ++it) {
+                if (it->busy) continue;
+                if (it->reliability > best_reliability) {
+                    best_reliability = it->reliability;
+                    best_it = it;
+                }
+            }
+        }
+        if (best_it == ws.agents.end()) continue;
+        best_it->busy = true;
+        best_it->task_id = task_id;
+        assigned.push_back(best_it->id);
     }
     return assigned;
 }

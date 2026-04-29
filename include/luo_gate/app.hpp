@@ -37,6 +37,9 @@ struct AgentProfile {
     int capacity = 100;
     bool busy = false;
     std::string task_id;
+    double reliability = 0.9;
+    std::string availability = "always";
+    double cost_per_task = 1.0;
 };
 
 struct TaskStep {
