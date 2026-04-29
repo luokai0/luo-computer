@@ -10,10 +10,10 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
-#include <sstream>
-#include <utility>
-#include <string_view>
 #include <optional>
+#include <sstream>
+#include <string_view>
+#include <utility>
 
 namespace luo_gate {
 namespace {
@@ -599,6 +599,8 @@ void App::seed_swarm(Workspace& ws) {
     seed_default_swarm(ws);
 }
 
+std::vector<std::string> App::roles_for_kind(std::string_view kind) const { return default_roles_for_kind(kind); }
+
 bool App::seed_agents_from_config(Workspace& ws) {
     const auto file = data_root_ / "agents.csv";
     std::ifstream in(file);
@@ -635,31 +637,27 @@ void App::seed_default_swarm(Workspace& ws) {
     }
 }
 
-std::vector<std::string> App::roles_for_kind(std::string_view kind) const { return default_roles_for_kind(kind); }
-
 std::vector<std::string> App::assign_agents(Workspace& ws, const std::vector<std::string>& roles, const std::string& task_id) {
     std::vector<std::string> assigned;
     for (const auto& role : roles) {
         auto best_it = ws.agents.end();
-        double best_reliability = -1.0;
+        double best_score = -1.0;
+
         for (auto it = ws.agents.begin(); it != ws.agents.end(); ++it) {
             if (it->busy) continue;
-            if (it->role.find(role) == std::string::npos) continue;
-            if (it->reliability > best_reliability) {
-                best_reliability = it->reliability;
+            double score = it->reliability;
+            if (it->availability == "always") score += 0.05;
+            if (it->role.find(role) != std::string::npos) score += 0.5;
+            score -= static_cast<double>(it->capacity) / 1000.0;
+
+            if (best_it == ws.agents.end() || score > best_score || (score == best_score && it->task_id < best_it->task_id)) {
                 best_it = it;
+                best_score = score;
             }
         }
-        if (best_it == ws.agents.end()) {
-            for (auto it = ws.agents.begin(); it != ws.agents.end(); ++it) {
-                if (it->busy) continue;
-                if (it->reliability > best_reliability) {
-                    best_reliability = it->reliability;
-                    best_it = it;
-                }
-            }
-        }
+
         if (best_it == ws.agents.end()) continue;
+
         best_it->busy = true;
         best_it->task_id = task_id;
         assigned.push_back(best_it->id);
