@@ -494,6 +494,23 @@ bool App::set_secret(std::string service, std::string value, std::string scope) 
     return true;
 }
 
+bool App::add_agent_message(std::string agent_id, std::string category, std::string content) {
+    if (active_user_.empty()) return false;
+    workspace().inbox.push_back(AgentMessage{std::move(agent_id), std::move(category), std::move(content), now()});
+    record_trace("agent", "system", "message", content);
+    touch();
+    return true;
+}
+
+std::vector<AgentMessage> App::agent_messages(std::string_view agent_id) const {
+    std::vector<AgentMessage> out;
+    if (active_user_.empty()) return out;
+    for (const auto& msg : workspace().inbox) {
+        if (msg.agent_id == agent_id) out.push_back(msg);
+    }
+    return out;
+}
+
 std::vector<SecretRecord> App::secrets() const {
     return active_user_.empty() ? std::vector<SecretRecord>{} : workspace().secrets;
 }

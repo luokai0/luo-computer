@@ -152,8 +152,16 @@ struct Workspace {
     std::vector<DeviceLink> devices;
     std::vector<TraceEvent> trace;
     std::vector<TraceEvent> audit;
+    std::vector<AgentMessage> inbox;
     std::vector<ApprovalRecord> approvals;
     std::vector<std::string> pending_approvals;
+};
+
+struct AgentMessage {
+    std::string agent_id;
+    std::string category;
+    std::string content;
+    Timestamp created_at = 0;
 };
 
 struct Summary {
@@ -275,6 +283,8 @@ public:
 
     std::vector<TraceEvent> audit_log(std::size_t limit = 200) const;
     bool add_trace(std::string category, std::string actor, std::string action, std::string detail);
+    bool add_agent_message(std::string agent_id, std::string category, std::string content);
+    std::vector<AgentMessage> agent_messages(std::string_view agent_id) const;
     Summary summary() const;
 
     bool require_approval(std::string action, std::string detail);

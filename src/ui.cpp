@@ -230,6 +230,35 @@ void append_recent_activity(std::ostringstream& out, const App& app) {
     out << "</div>";
 }
 
+void append_agent_inbox(std::ostringstream& out, const App& app) {
+    const auto agents = app.agents(3);
+    out << "<div class='agent-inbox'><h3>Agent inbox</h3>";
+    if (agents.empty()) {
+        out << "<div class='pill'>No agents yet.</div></div>";
+        return;
+    }
+    out << "<div class='agent-grid'>";
+    for (const auto& agent : agents) {
+        const auto messages = app.agent_messages(agent.id);
+        out << "<div class='agent-card'>";
+        out << "<strong>" << html_escape(agent.id) << "</strong> <span class='pill'>" << html_escape(agent.role) << "</span>";
+        out << "<div class='agent-msg-group'>";
+        if (messages.empty()) {
+            out << "<div class='agent-msg'>Nothing yet.</div>";
+        } else {
+            for (const auto& msg : messages) {
+                out << "<div class='agent-msg'>" << html_escape(msg.category) << ": " << html_escape(msg.content) << "</div>";
+            }
+        }
+        out << "</div>";
+        out << "<button class='pill agent-msg-btn' data-agent='" << html_escape(agent.id) << "'>Send note</button>";
+        out << "</div>";
+    }
+    out << "</div>";
+    out << "<script>(function(){ document.querySelectorAll('.agent-msg-btn').forEach(btn => btn.addEventListener('click', () => console.log('Send note to ' + btn.dataset.agent))); })();</script>";
+    out << "</div>";
+}
+
 void append_computer_playback(std::ostringstream& out, const App& app) {
     out << "<div class='trace'>";
     const auto log = app.computer_log(24);
@@ -261,7 +290,12 @@ std::string render_dashboard_html(const App& app) {
         << ".shortcut-group{margin-top:16px}"
         << ".shortcut-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;text-align:left}"
         << ".recent-activity .divider{margin:12px 0;border-top:1px solid #37405c}"
-        << ".recent-activity{max-height:400px;overflow:auto}"
+        << ".recent-activity{max-height:380px;overflow:auto}"
+        << ".agent-inbox{margin-top:16px;border-top:1px solid #2a3553;padding-top:12px;}"
+        << ".agent-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-top:12px;}"
+        << ".agent-card{background:#1a1f33;border:1px solid #2f3d5f;border-radius:12px;padding:10px;}"
+        << ".agent-msg-group{margin-top:8px;}"
+        << ".agent-msg{padding:6px 8px;background:#243155;border-radius:8px;margin-bottom:6px;font-size:0.85rem;}"
         << ".lead{margin:0 0 12px;font-weight:600;font-size:1.05rem;color:#98a9c7}"
         << ".history-table{width:100%;border-collapse:collapse;}"
         << ".history-filter{width:100%;padding:8px;border:1px solid #37405c;border-radius:8px;}"
@@ -284,6 +318,7 @@ std::string render_dashboard_html(const App& app) {
     out << "</section>"
         << "<section class='card'>";
     append_recent_activity(out, app);
+    append_agent_inbox(out, app);
     out << "</section></div>";
     out << "<section class='card' style='margin-top:16px'><h3>Computer Playback</h3><p>computer actions timeline</p>";
     append_computer_playback(out, app);
