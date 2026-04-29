@@ -9,6 +9,7 @@ LUO COMPUTER is the runtime where the LUO OS swarm works on a visible computer s
 - Tasks that decompose into visible steps
 - A local computer record with browser / terminal / files / computer surfaces
 - A visible action log so the user can watch what the swarm is doing
+- A cloned `luo_os/` tree inside the repo that the swarm imports and works against
 - Per-user secrets, files, skills, projects, and device links
 
 ## Current prototype

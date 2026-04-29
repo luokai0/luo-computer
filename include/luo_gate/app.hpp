@@ -186,6 +186,7 @@ public:
 
     bool attach_computer(std::string id, std::string label, std::string os = {}, std::vector<std::string> surfaces = {}, bool active = true);
     bool set_active_computer(std::string_view id);
+    bool import_luo_os(std::filesystem::path source_root);
     std::vector<ComputerRecord> computers() const;
     std::vector<ComputerAction> computer_log(std::size_t limit = 200) const;
     bool record_computer_action(std::string computer_id, std::string agent_id, std::string surface, std::string verb, std::string target, std::string detail);

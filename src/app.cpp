@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <utility>
@@ -452,6 +453,39 @@ Timestamp App::now() {
 
 bool App::add_trace(std::string category, std::string actor, std::string action, std::string detail) {
     record_trace(std::move(category), std::move(actor), std::move(action), std::move(detail));
+    return true;
+}
+
+bool App::import_luo_os(std::filesystem::path source_root) {
+    if (active_user_.empty()) return false;
+    if (!std::filesystem::exists(source_root)) return false;
+
+    auto& ws = workspace();
+    const std::vector<std::pair<std::string, std::string>> focus = {
+        {"core-brain", "Study ai_core and how the brain routes tasks"},
+        {"agent-stack", "Study luo_agent orchestration, memory, and tools"},
+        {"desktop-surface", "Study ui, dashboard, and window manager layers"},
+        {"system-apps", "Study built-in apps and file workflows"},
+        {"kernel-path", "Study kernel, boot, drivers, and compat docs"},
+        {"delivery", "Study Docker, supervisor, systemd, and start scripts"},
+        {"docs-map", "Read README, architecture, roadmap, and SOURCES"},
+    };
+
+    for (const auto& [id, title] : focus) {
+        create_task("LUO OS: " + title, "Import and understand " + source_root.string() + " as the live computer workspace", "research");
+        record_trace("source", active_user_, "import", id + ":" + title);
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(source_root)) {
+        if (!entry.is_directory()) continue;
+        const auto name = entry.path().filename().string();
+        const auto description = "Inspect the LUO OS subsystem folder: " + name;
+        create_task("Inspect " + name, description, "research");
+        record_computer_action(ws.active_computer_id.empty() ? std::string{"local-computer"} : ws.active_computer_id, "planner", "computer", "inspect", name, description);
+    }
+
+    record_audit(active_user_, "import", "cloned LUO OS is now the live swarm workspace");
+    touch();
     return true;
 }
 

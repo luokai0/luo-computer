@@ -43,7 +43,7 @@ std::string render_dashboard_html(const App& app) {
         << "<div class='grid'>"
         << "<section class='card'><h3>Swarm</h3><p>Agents: " << s.agent_count << "</p><p>Tasks: " << s.task_count << "</p><p>Roles: ";
     for (const auto& [role, count] : s.role_counts) out << "<span class='pill'>" << role << ": " << count << "</span>";
-    out << "</p><p>Computer: " << s.computer_count << "</p></section>"
+    out << "</p><p>Computer: " << s.computer_count << "</p><p>Imported LUO OS: active</p></section>"
         << "<section class='card'><h3>Tasks</h3>";
     for (const auto& t : app.tasks()) {
         out << "<div class='pill'>" << t.title << " · " << t.status << "</div><br/>";

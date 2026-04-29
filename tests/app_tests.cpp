@@ -2,6 +2,7 @@
 #include "luo_gate/security.hpp"
 
 #include <cassert>
+#include <filesystem>
 #include <iostream>
 
 int main() {
@@ -20,6 +21,7 @@ int main() {
     assert(app.computers().size() == 1);
     assert(app.attach_computer("desktop", "Desktop", "linux", {"computer", "browser", "terminal"}, true));
     assert(app.set_active_computer("desktop"));
+    assert(app.import_luo_os(std::filesystem::path("luo_os")) == false);
     assert(app.create_task("Build swarm", "Break work into roles", "build"));
     assert(app.tick());
 
