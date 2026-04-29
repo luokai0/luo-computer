@@ -11,9 +11,31 @@
 #include <fstream>
 #include <sstream>
 #include <utility>
+#include <string_view>
 
 namespace luo_gate {
 namespace {
+const char* session_stage_to_string(SessionStage stage) {
+    switch (stage) {
+        case SessionStage::Idle: return "idle";
+        case SessionStage::Starting: return "starting";
+        case SessionStage::Running: return "running";
+        case SessionStage::Paused: return "paused";
+        case SessionStage::Failed: return "failed";
+        case SessionStage::Resumed: return "resumed";
+    }
+    return "idle";
+}
+
+SessionStage session_stage_from_string(std::string_view text) {
+    if (text == "starting") return SessionStage::Starting;
+    if (text == "running") return SessionStage::Running;
+    if (text == "paused") return SessionStage::Paused;
+    if (text == "failed") return SessionStage::Failed;
+    if (text == "resumed") return SessionStage::Resumed;
+    return SessionStage::Idle;
+}
+
 std::vector<std::string> default_roles_for_kind(std::string_view kind) {
     if (kind == "build") return {"planner", "builder", "reviewer", "tester", "operator"};
     if (kind == "research") return {"researcher", "analyst", "writer"};
@@ -201,8 +223,9 @@ bool App::start_session(std::string title, std::string note) {
     session_.note = std::move(note);
     session_.last_started_at = now();
     session_.last_resumed_at = 0;
+    set_session_stage(SessionStage::Starting, "Starting \"" + session_.title + "\"");
     record_audit(active_user_, "session", "started " + session_.title);
-    touch();
+    set_session_stage(SessionStage::Running, "Session running");
     return true;
 }
 
@@ -212,7 +235,7 @@ bool App::resume_session() {
     session_.last_resumed_at = now();
     if (session_.title.empty()) session_.title = "Resume session";
     record_audit(active_user_, "session", "resumed " + session_.title);
-    touch();
+    set_session_stage(SessionStage::Resumed, "Resumed \"" + session_.title + "\"");
     return true;
 }
 
@@ -581,6 +604,15 @@ bool StateIO::load(App& app) {
             app.session_.note = unquote(parts[3]);
             app.session_.last_started_at = std::stoll(parts[4]);
             app.session_.last_resumed_at = std::stoll(parts[5]);
+            if (parts.size() >= 7) {
+                app.session_.stage = session_stage_from_string(unquote(parts[6]));
+            }
+            if (parts.size() >= 8) {
+                app.session_.stage_detail = unquote(parts[7]);
+            }
+            if (parts.size() >= 9) {
+                app.session_.stage_updated_at = std::stoll(parts[8]);
+            }
         } else if (kind == "user" && parts.size() >= 5) {
             const auto username = unquote(parts[1]);
             const auto password_hash = unquote(parts[2]);
@@ -636,7 +668,17 @@ bool StateIO::save(const App& app) {
     out << "# luo-computer state\n";
     out << rowify({"active_user", escape_json(app.active_user_)}) << "\n";
     out << rowify({"luo_os_root", escape_json(app.luo_os_root_.string())}) << "\n";
-    out << rowify({"session", app.session_.resumed ? "1" : "0", escape_json(app.session_.title), escape_json(app.session_.note), std::to_string(app.session_.last_started_at), std::to_string(app.session_.last_resumed_at)}) << "\n";
+    out << rowify({
+        "session",
+        app.session_.resumed ? "1" : "0",
+        escape_json(app.session_.title),
+        escape_json(app.session_.note),
+        std::to_string(app.session_.last_started_at),
+        std::to_string(app.session_.last_resumed_at),
+        escape_json(session_stage_to_string(app.session_.stage)),
+        escape_json(app.session_.stage_detail),
+        std::to_string(app.session_.stage_updated_at),
+    }) << "\n";
     for (const auto& [username, user] : app.users_) {
         out << rowify({"user", escape_json(username), escape_json(user.password_hash), escape_json(user.email), serialize_consent(user.consent)}) << "\n";
     }
@@ -664,6 +706,33 @@ Timestamp App::now() {
 bool App::add_trace(std::string category, std::string actor, std::string action, std::string detail) {
     record_trace(std::move(category), std::move(actor), std::move(action), std::move(detail));
     return true;
+}
+
+void App::set_session_stage(SessionStage stage, std::string detail) {
+    session_.stage = stage;
+    session_.stage_detail = std::move(detail);
+    session_.stage_updated_at = now();
+    touch();
+}
+
+bool App::pause_session(std::string reason) {
+    if (active_user_.empty()) return false;
+    set_session_stage(SessionStage::Paused, std::move(reason));
+    record_audit(active_user_, "session", "paused " + session_.title);
+    return true;
+}
+
+bool App::fail_session(std::string reason) {
+    if (active_user_.empty()) return false;
+    set_session_stage(SessionStage::Failed, std::move(reason));
+    record_audit(active_user_, "session", "failed " + session_.title);
+    return true;
+}
+
+void App::reset_session() {
+    session_ = SessionState{};
+    set_session_stage(SessionStage::Idle, "Reset");
+    if (!active_user_.empty()) record_audit(active_user_, "session", "reset");
 }
 
 std::vector<LuoIndexEntry> App::luo_index_entries(std::size_t limit) const {

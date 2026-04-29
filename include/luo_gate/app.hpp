@@ -156,12 +156,38 @@ struct Summary {
     std::map<std::string, std::size_t> role_counts;
 };
 
+enum class SessionStage { Idle, Starting, Running, Paused, Failed, Resumed };
+
+inline const char* session_stage_to_string(SessionStage stage) {
+    switch (stage) {
+        case SessionStage::Idle: return "idle";
+        case SessionStage::Starting: return "starting";
+        case SessionStage::Running: return "running";
+        case SessionStage::Paused: return "paused";
+        case SessionStage::Failed: return "failed";
+        case SessionStage::Resumed: return "resumed";
+    }
+    return "idle";
+}
+
+inline SessionStage session_stage_from_string(std::string_view text) {
+    if (text == "starting") return SessionStage::Starting;
+    if (text == "running") return SessionStage::Running;
+    if (text == "paused") return SessionStage::Paused;
+    if (text == "failed") return SessionStage::Failed;
+    if (text == "resumed") return SessionStage::Resumed;
+    return SessionStage::Idle;
+}
+
 struct SessionState {
     bool resumed = false;
     std::string title;
     std::string note;
     Timestamp last_started_at = 0;
     Timestamp last_resumed_at = 0;
+    SessionStage stage = SessionStage::Idle;
+    std::string stage_detail;
+    Timestamp stage_updated_at = 0;
 };
 
 class App {
@@ -185,6 +211,9 @@ public:
 
     bool start_session(std::string title, std::string note = {});
     bool resume_session();
+    bool pause_session(std::string reason = "Paused by user");
+    bool fail_session(std::string reason = "Session failed");
+    void reset_session();
     SessionState session_state() const;
 
     bool add_agent(std::string id, std::string role, std::vector<std::string> expertise = {}, int capacity = 100);
@@ -232,6 +261,7 @@ public:
     std::filesystem::path data_root() const;
 
 private:
+    void set_session_stage(SessionStage stage, std::string detail);
     friend struct StateIO;
     friend struct StateStore;
 
