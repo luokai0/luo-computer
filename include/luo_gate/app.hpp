@@ -40,6 +40,7 @@ struct AgentProfile {
     double reliability = 0.9;
     std::string availability = "always";
     double cost_per_task = 1.0;
+    Timestamp last_active = 0;
 };
 
 struct TaskStep {
@@ -313,6 +314,7 @@ private:
     std::vector<std::string> roles_for_kind(std::string_view kind) const;
     std::vector<std::string> assign_agents(Workspace& ws, const std::vector<std::string>& roles, const std::string& task_id);
     AgentProfile* find_best_agent(Workspace& ws, std::string_view role);
+    void check_agent_health(Workspace& ws);
     void release_agents(Workspace& ws, const TaskRecord& task);
     void record_trace(std::string category, std::string actor, std::string action, std::string detail);
     void record_audit(std::string actor, std::string action, std::string detail);

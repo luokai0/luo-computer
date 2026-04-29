@@ -362,6 +362,7 @@ bool App::tick() {
         if (task.status == "done") release_agents(ws, task);
         progressed = true;
     }
+    check_agent_health(ws);
     if (progressed) touch();
     return progressed;
 }
@@ -682,6 +683,7 @@ std::vector<std::string> App::assign_agents(Workspace& ws, const std::vector<std
         if (!best) continue;
         best->busy = true;
         best->task_id = task_id;
+        best->last_active = now();
         assigned.push_back(best->id);
     }
     return assigned;
@@ -707,6 +709,7 @@ AgentProfile* App::find_best_agent(Workspace& ws, std::string_view role) {
 void App::release_agents(Workspace& ws, const TaskRecord& task) {
     for (auto& agent : ws.agents) {
         if (agent.task_id == task.id) {
+            agent.last_active = now();
             agent.busy = false;
             agent.task_id.clear();
         }
@@ -716,6 +719,16 @@ void App::release_agents(Workspace& ws, const TaskRecord& task) {
 void App::remember_step(TaskRecord& task, TaskStep step) {
     task.memory.emplace_back(step.actor + ": " + step.action + " — " + step.detail);
     if (task.memory.size() > 5) task.memory.erase(task.memory.begin());
+}
+
+void App::check_agent_health(Workspace& ws) {
+    const Timestamp cutoff = now() - 30;
+    for (auto& agent : ws.agents) {
+        if (agent.busy && agent.last_active && agent.last_active < cutoff) {
+            agent.reliability = std::max(0.5, agent.reliability - 0.02);
+            record_trace("health", "monitor", "degrade", agent.id + " reliability " + std::to_string(agent.reliability));
+        }
+    }
 }
 
 bool App::require_approval(std::string action, std::string detail) {
