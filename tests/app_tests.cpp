@@ -4,6 +4,7 @@
 #include <cassert>
 #include <filesystem>
 #include <iostream>
+#include <random>
 
 int main() {
     using namespace luo_gate;
@@ -47,6 +48,27 @@ int main() {
     assert(state.find("\"agents\":") != std::string::npos);
     assert(state.find("\"tasks\":1") != std::string::npos);
     assert(state.find("\"computers\":") != std::string::npos);
+
+    const auto temp_root = std::filesystem::temp_directory_path() / "luo-computer-state-test";
+    std::filesystem::remove_all(temp_root);
+    {
+        App saved(temp_root);
+        assert(saved.register_user("Luo", "Gate"));
+        assert(saved.login("Luo", "Gate"));
+        assert(saved.attach_computer("desk", "Desk", "linux", {"computer", "browser"}, true));
+        assert(saved.create_task("Persist", "Save and reload", "build"));
+        assert(saved.tick());
+        assert(saved.save());
+    }
+    {
+        App loaded(temp_root);
+        assert(loaded.load());
+        assert(loaded.has_user("Luo"));
+        assert(loaded.login("Luo", "Gate"));
+        assert(loaded.computers().size() >= 1);
+        assert(loaded.tasks().size() >= 1);
+    }
+    std::filesystem::remove_all(temp_root);
 
     std::cout << "luo-computer tests passed\n";
     return 0;

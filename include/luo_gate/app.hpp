@@ -214,6 +214,8 @@ public:
     std::filesystem::path data_root() const;
 
 private:
+    friend struct StateIO;
+
     Workspace& workspace();
     const Workspace& workspace() const;
     UserRecord& active_user_record();

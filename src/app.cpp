@@ -1,6 +1,7 @@
 #include "luo_gate/app.hpp"
 #include "luo_gate/platform.hpp"
 #include "luo_gate/security.hpp"
+#include "luo_gate/state_io.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -19,9 +20,7 @@ std::vector<std::string> default_roles_for_kind(std::string_view kind) {
     return {"planner", "operator", "reviewer"};
 }
 
-std::string default_agent_id(std::size_t index) {
-    return "agent-" + std::to_string(index + 1);
-}
+std::string default_agent_id(std::size_t index) { return "agent-" + std::to_string(index + 1); }
 
 std::string default_agent_role(std::size_t index) {
     static constexpr const char* roles[] = {"planner", "builder", "reviewer", "tester", "operator", "researcher", "designer", "writer", "monitor", "safety"};
@@ -43,35 +42,105 @@ std::string escape_json(std::string_view value) {
     return out.str();
 }
 
-std::string default_computer_id() {
-    return "local-computer";
+std::string default_computer_id() { return "local-computer"; }
+
+std::string unquote(std::string value) {
+    if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+        value = value.substr(1, value.size() - 2);
+    }
+    std::string out;
+    out.reserve(value.size());
+    bool escape = false;
+    for (char c : value) {
+        if (escape) {
+            switch (c) {
+                case 'n': out.push_back('\n'); break;
+                case 'r': out.push_back('\r'); break;
+                case 't': out.push_back('\t'); break;
+                case '\\': out.push_back('\\'); break;
+                case '"': out.push_back('"'); break;
+                default: out.push_back(c); break;
+            }
+            escape = false;
+        } else if (c == '\\') {
+            escape = true;
+        } else {
+            out.push_back(c);
+        }
+    }
+    return out;
 }
+
+std::vector<std::string> split(std::string_view text, char delim) {
+    std::vector<std::string> parts;
+    std::string current;
+    for (char c : text) {
+        if (c == delim) {
+            parts.push_back(current);
+            current.clear();
+        } else {
+            current.push_back(c);
+        }
+    }
+    parts.push_back(current);
+    return parts;
+}
+
+std::string join(const std::vector<std::string>& items, char delim) {
+    std::ostringstream out;
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        if (i) out << delim;
+        out << items[i];
+    }
+    return out.str();
+}
+
+ConsentFlags parse_consent(const std::vector<std::string>& fields) {
+    ConsentFlags c;
+    if (fields.size() >= 7) {
+        c.accept_terms = fields[0] == "1";
+        c.allow_local_storage = fields[1] == "1";
+        c.allow_files = fields[2] == "1";
+        c.allow_chat_history = fields[3] == "1";
+        c.allow_project_execution = fields[4] == "1";
+        c.allow_device_links = fields[5] == "1";
+        c.allow_analytics = fields[6] == "1";
+    }
+    return c;
+}
+
+std::string serialize_consent(const ConsentFlags& c) {
+    return std::string(c.accept_terms ? "1" : "0") + '|' +
+           (c.allow_local_storage ? "1" : "0") + '|' +
+           (c.allow_files ? "1" : "0") + '|' +
+           (c.allow_chat_history ? "1" : "0") + '|' +
+           (c.allow_project_execution ? "1" : "0") + '|' +
+           (c.allow_device_links ? "1" : "0") + '|' +
+           (c.allow_analytics ? "1" : "0");
+}
+
+std::string default_state_text() {
+    return "";
+}
+
+std::string rowify(const std::vector<std::string>& columns) {
+    std::ostringstream out;
+    for (std::size_t i = 0; i < columns.size(); ++i) {
+        if (i) out << '\t';
+        out << columns[i];
+    }
+    return out.str();
+}
+
 } // namespace
 
 App::App(std::filesystem::path data_root) : data_root_(data_root.empty() ? default_data_root() : std::move(data_root)) {
     ensure_workspace_seeded();
 }
 
-bool App::load() {
-    ensure_workspace_seeded();
-    std::ifstream in(state_file());
-    if (!in) return false;
-    std::string line;
-    while (std::getline(in, line)) {
-        if (line.rfind("active_user=", 0) == 0) active_user_ = line.substr(12);
-        if (line.rfind("computer=", 0) == 0) workspace().active_computer_id = line.substr(9);
-    }
-    return true;
-}
+bool App::load() { return StateIO::load(*this); }
 
-bool App::save() const {
-    std::error_code ec;
-    std::filesystem::create_directories(data_root_, ec);
-    std::ofstream out(state_file());
-    if (!out) return false;
-    out << export_state();
-    return true;
-}
+bool App::save() const { return StateIO::save(*this); }
 
 bool App::has_user(std::string_view username) const {
     return users_.contains(std::string(username));
@@ -445,7 +514,94 @@ void App::touch() {
     if (auto_save_) save();
 }
 
-std::filesystem::path App::state_file() const { return data_root_ / "state.txt"; }
+std::filesystem::path App::state_file() const { return data_root_ / "state.tsv"; }
+
+bool StateIO::load(App& app) {
+    std::ifstream in(app.state_file());
+    if (!in) return false;
+
+    app.users_.clear();
+    app.workspaces_.clear();
+    app.active_user_.clear();
+
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        const auto parts = split(line, '\t');
+        if (parts.empty()) continue;
+        const auto& kind = parts[0];
+        if (kind == "active_user" && parts.size() >= 2) {
+            app.active_user_ = unquote(parts[1]);
+        } else if (kind == "user" && parts.size() >= 5) {
+            const auto username = unquote(parts[1]);
+            const auto password_hash = unquote(parts[2]);
+            const auto email = unquote(parts[3]);
+            const auto consent_fields = split(parts[4], '|');
+            const auto consent = parse_consent(consent_fields);
+            app.users_[username] = UserRecord{username, password_hash, email, consent};
+            app.workspaces_[username].consent = consent;
+        } else if (kind == "computer" && parts.size() >= 6) {
+            const auto owner = unquote(parts[1]);
+            auto& ws = app.workspaces_[owner];
+            auto surfaces = split(unquote(parts[4]), '|');
+            ws.computers.push_back(ComputerRecord{unquote(parts[2]), unquote(parts[3]), unquote(parts[5]), surfaces, true});
+        } else if (kind == "task" && parts.size() >= 9) {
+            const auto owner = unquote(parts[1]);
+            auto& ws = app.workspaces_[owner];
+            TaskRecord t;
+            t.id = unquote(parts[2]);
+            t.title = unquote(parts[3]);
+            t.description = unquote(parts[4]);
+            t.kind = unquote(parts[5]);
+            t.status = unquote(parts[6]);
+            t.owner = owner;
+            t.step_cursor = static_cast<std::size_t>(std::stoull(parts[7]));
+            t.assigned_agents = split(unquote(parts[8]), '|');
+            ws.tasks.push_back(t);
+        } else if (kind == "agent" && parts.size() >= 6) {
+            const auto owner = unquote(parts[1]);
+            auto& ws = app.workspaces_[owner];
+            ws.agents.push_back(AgentProfile{unquote(parts[2]), unquote(parts[3]), split(unquote(parts[4]), '|'), std::stoi(parts[5]), false, {}});
+        } else if (kind == "trace" && parts.size() >= 6) {
+            const auto owner = unquote(parts[1]);
+            auto& ws = app.workspaces_[owner];
+            ws.trace.push_back(TraceEvent{static_cast<Timestamp>(std::stoll(parts[2])), unquote(parts[3]), unquote(parts[4]), unquote(parts[5]), parts.size() > 6 ? unquote(parts[6]) : std::string{}});
+        }
+    }
+
+    if (!app.active_user_.empty()) {
+        app.ensure_workspace_seeded();
+    }
+    return true;
+}
+
+bool StateIO::save(const App& app) {
+    std::error_code ec;
+    std::filesystem::create_directories(app.data_root_, ec);
+    std::ofstream out(app.state_file());
+    if (!out) return false;
+
+    out << "# luo-computer state\n";
+    out << rowify({"active_user", escape_json(app.active_user_)}) << "\n";
+    for (const auto& [username, user] : app.users_) {
+        out << rowify({"user", escape_json(username), escape_json(user.password_hash), escape_json(user.email), serialize_consent(user.consent)}) << "\n";
+    }
+    for (const auto& [owner, ws] : app.workspaces_) {
+        for (const auto& computer : ws.computers) {
+            out << rowify({"computer", escape_json(owner), escape_json(computer.id), escape_json(computer.label), escape_json(join(computer.surfaces, '|')), escape_json(computer.os)}) << "\n";
+        }
+        for (const auto& agent : ws.agents) {
+            out << rowify({"agent", escape_json(owner), escape_json(agent.id), escape_json(agent.role), escape_json(join(agent.expertise, '|')), std::to_string(agent.capacity)}) << "\n";
+        }
+        for (const auto& task : ws.tasks) {
+            out << rowify({"task", escape_json(owner), escape_json(task.id), escape_json(task.title), escape_json(task.description), escape_json(task.kind), escape_json(task.status), std::to_string(task.step_cursor), escape_json(join(task.assigned_agents, '|'))}) << "\n";
+        }
+        for (const auto& event : ws.trace) {
+            out << rowify({"trace", escape_json(owner), std::to_string(event.created_at), escape_json(event.category), escape_json(event.actor), escape_json(event.action), escape_json(event.detail)}) << "\n";
+        }
+    }
+    return true;
+}
 
 Timestamp App::now() {
     return static_cast<Timestamp>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
