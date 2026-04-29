@@ -64,6 +64,9 @@ struct TaskRecord {
     std::size_t step_cursor = 0;
     Timestamp created_at = 0;
     Timestamp updated_at = 0;
+    std::vector<std::string> memory;
+    std::size_t memory_cursor = 0;
+    std::string current_agent_id;
 };
 
 struct ComputerRecord {
@@ -127,6 +130,14 @@ struct TraceEvent {
     std::string detail;
 };
 
+struct ApprovalRecord {
+    std::string action;
+    std::string detail;
+    bool granted = false;
+    Timestamp recorded_at = 0;
+    Timestamp granted_at = 0;
+};
+
 struct Workspace {
     ConsentFlags consent;
     std::vector<AgentProfile> agents;
@@ -141,6 +152,8 @@ struct Workspace {
     std::vector<DeviceLink> devices;
     std::vector<TraceEvent> trace;
     std::vector<TraceEvent> audit;
+    std::vector<ApprovalRecord> approvals;
+    std::vector<std::string> pending_approvals;
 };
 
 struct Summary {
@@ -264,11 +277,17 @@ public:
     bool add_trace(std::string category, std::string actor, std::string action, std::string detail);
     Summary summary() const;
 
+    bool require_approval(std::string action, std::string detail);
+    bool approve_action(std::string action);
+    std::vector<std::string> pending_approvals() const;
+
     std::string export_state() const;
     std::filesystem::path data_root() const;
 
 private:
     void set_session_stage(SessionStage stage, std::string detail);
+    void record_approval(std::string action, std::string detail, bool granted);
+    bool has_approval(std::string action) const;
     friend struct StateIO;
     friend struct StateStore;
 
@@ -283,9 +302,11 @@ private:
     void seed_default_swarm(Workspace& ws);
     std::vector<std::string> roles_for_kind(std::string_view kind) const;
     std::vector<std::string> assign_agents(Workspace& ws, const std::vector<std::string>& roles, const std::string& task_id);
+    AgentProfile* find_best_agent(Workspace& ws, std::string_view role);
     void release_agents(Workspace& ws, const TaskRecord& task);
     void record_trace(std::string category, std::string actor, std::string action, std::string detail);
     void record_audit(std::string actor, std::string action, std::string detail);
+    void remember_step(TaskRecord& task, TaskStep step);
     void touch();
     std::filesystem::path state_file() const;
     static Timestamp now();

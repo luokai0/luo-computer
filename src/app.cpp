@@ -14,6 +14,8 @@
 #include <sstream>
 #include <string_view>
 #include <utility>
+#include <limits>
+#include <array>
 
 namespace luo_gate {
 namespace {
@@ -206,6 +208,14 @@ std::optional<AgentProfile> parse_agent_line(std::string_view line) {
     };
 }
 
+static bool is_risky_action(std::string_view verb) {
+    static const std::array risk = {"execute", "delete", "link", "commit", "deploy"};
+    for (const auto& candidate : risk) {
+        if (verb == candidate) return true;
+    }
+    return false;
+}
+
 } // namespace
 
 App::App(std::filesystem::path data_root) : data_root_(data_root.empty() ? default_data_root() : std::move(data_root)) {
@@ -339,7 +349,14 @@ bool App::tick() {
         auto step = task.plan[task.step_cursor];
         task.status = task.step_cursor + 1 >= task.plan.size() ? "done" : "running";
         task.updated_at = now();
+        auto agent = find_best_agent(ws, step.actor);
+        if (agent) {
+            task.current_agent_id = agent->id;
+            agent->busy = true;
+            agent->task_id = task.id;
+        }
         record_trace("task", step.actor, step.action, task.id + " -> " + step.detail);
+        remember_step(task, step);
         record_computer_action(ws.active_computer_id.empty() ? default_computer_id() : ws.active_computer_id, step.actor, step.surface, step.action, task.id, step.detail);
         task.step_cursor++;
         if (task.status == "done") release_agents(ws, task);
@@ -455,6 +472,10 @@ std::string App::active_computer_id() const {
 
 bool App::record_computer_action(std::string computer_id, std::string agent_id, std::string surface, std::string verb, std::string target, std::string detail) {
     if (active_user_.empty()) return false;
+    if (is_risky_action(verb) && !has_approval(verb)) {
+        require_approval(verb, detail);
+        return false;
+    }
     workspace().computer_log.push_back(ComputerAction{now(), std::move(computer_id), std::move(agent_id), std::move(surface), std::move(verb), std::move(target), std::move(detail)});
     record_trace("computer", active_user_, verb, detail);
     touch();
@@ -640,29 +661,30 @@ void App::seed_default_swarm(Workspace& ws) {
 std::vector<std::string> App::assign_agents(Workspace& ws, const std::vector<std::string>& roles, const std::string& task_id) {
     std::vector<std::string> assigned;
     for (const auto& role : roles) {
-        auto best_it = ws.agents.end();
-        double best_score = -1.0;
-
-        for (auto it = ws.agents.begin(); it != ws.agents.end(); ++it) {
-            if (it->busy) continue;
-            double score = it->reliability;
-            if (it->availability == "always") score += 0.05;
-            if (it->role.find(role) != std::string::npos) score += 0.5;
-            score -= static_cast<double>(it->capacity) / 1000.0;
-
-            if (best_it == ws.agents.end() || score > best_score || (score == best_score && it->task_id < best_it->task_id)) {
-                best_it = it;
-                best_score = score;
-            }
-        }
-
-        if (best_it == ws.agents.end()) continue;
-
-        best_it->busy = true;
-        best_it->task_id = task_id;
-        assigned.push_back(best_it->id);
+        auto* best = find_best_agent(ws, role);
+        if (!best) continue;
+        best->busy = true;
+        best->task_id = task_id;
+        assigned.push_back(best->id);
     }
     return assigned;
+}
+
+AgentProfile* App::find_best_agent(Workspace& ws, std::string_view role) {
+    AgentProfile* best = nullptr;
+    double best_score = -std::numeric_limits<double>::infinity();
+    for (auto& agent : ws.agents) {
+        if (agent.busy) continue;
+        double score = agent.reliability;
+        if (agent.availability == "always") score += 0.05;
+        if (agent.role.find(role) != std::string::npos) score += 0.5;
+        score -= static_cast<double>(agent.capacity) / 1000.0;
+        if (!best || score > best_score) {
+            best = &agent;
+            best_score = score;
+        }
+    }
+    return best;
 }
 
 void App::release_agents(Workspace& ws, const TaskRecord& task) {
@@ -672,6 +694,49 @@ void App::release_agents(Workspace& ws, const TaskRecord& task) {
             agent.task_id.clear();
         }
     }
+}
+
+void App::remember_step(TaskRecord& task, TaskStep step) {
+    task.memory.emplace_back(step.actor + ": " + step.action + " — " + step.detail);
+    if (task.memory.size() > 5) task.memory.erase(task.memory.begin());
+}
+
+bool App::require_approval(std::string action, std::string detail) {
+    if (has_approval(action)) return true;
+    auto& records = workspace().approvals;
+    records.push_back(ApprovalRecord{action, detail, false, now(), 0});
+    workspace().pending_approvals.push_back(action);
+    record_trace("approval", "system", "requested", action + ": " + detail);
+    return false;
+}
+
+bool App::approve_action(std::string action) {
+    auto& records = workspace().approvals;
+    for (auto& record : records) {
+        if (record.action == action && !record.granted) {
+            record.granted = true;
+            record.granted_at = now();
+            workspace().pending_approvals.erase(std::remove(workspace().pending_approvals.begin(), workspace().pending_approvals.end(), action), workspace().pending_approvals.end());
+            record_trace("approval", "system", "granted", action);
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<std::string> App::pending_approvals() const {
+    return workspace().pending_approvals;
+}
+
+void App::record_approval(std::string action, std::string detail, bool granted) {
+    workspace().approvals.push_back(ApprovalRecord{std::move(action), std::move(detail), granted, now(), granted ? now() : 0});
+}
+
+bool App::has_approval(std::string action) const {
+    for (const auto& record : workspace().approvals) {
+        if (record.action == action && record.granted) return true;
+    }
+    return false;
 }
 
 void App::record_trace(std::string category, std::string actor, std::string action, std::string detail) {
