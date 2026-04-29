@@ -9,6 +9,7 @@ find_package(Threads REQUIRED)
 
 add_library(luo_gate_core
     src/app.cpp
+    src/file_browser.cpp
     src/luo_index.cpp
     src/platform.cpp
     src/security.cpp
