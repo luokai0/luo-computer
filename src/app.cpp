@@ -579,12 +579,11 @@ void App::touch() {
 
 std::filesystem::path App::state_file() const { return data_root_ / "state.tsv"; }
 
-bool StateIO::load(App& app) {
+bool StateIO::load_global(App& app) {
     std::ifstream in(app.state_file());
     if (!in) return false;
 
     app.users_.clear();
-    app.workspaces_.clear();
     app.active_user_.clear();
     app.luo_os_root_.clear();
     app.luo_os_index_.entries.clear();
@@ -623,49 +622,13 @@ bool StateIO::load(App& app) {
             const auto consent = parse_consent(consent_fields);
             app.users_[username] = UserRecord{username, password_hash, email, consent};
             app.workspaces_[username].consent = consent;
-        } else if (kind == "computer" && parts.size() >= 6) {
-            const auto owner = unquote(parts[1]);
-            auto& ws = app.workspaces_[owner];
-            auto surfaces = split(unquote(parts[4]), '|');
-            ws.computers.push_back(ComputerRecord{unquote(parts[2]), unquote(parts[3]), unquote(parts[5]), surfaces, true});
-        } else if (kind == "task" && parts.size() >= 9) {
-            const auto owner = unquote(parts[1]);
-            auto& ws = app.workspaces_[owner];
-            TaskRecord t;
-            t.id = unquote(parts[2]);
-            t.title = unquote(parts[3]);
-            t.description = unquote(parts[4]);
-            t.kind = unquote(parts[5]);
-            t.status = unquote(parts[6]);
-            t.owner = owner;
-            t.step_cursor = static_cast<std::size_t>(std::stoull(parts[7]));
-            t.assigned_agents = split(unquote(parts[8]), '|');
-            ws.tasks.push_back(t);
-        } else if (kind == "agent" && parts.size() >= 6) {
-            const auto owner = unquote(parts[1]);
-            auto& ws = app.workspaces_[owner];
-            ws.agents.push_back(AgentProfile{unquote(parts[2]), unquote(parts[3]), split(unquote(parts[4]), '|'), std::stoi(parts[5]), false, {}});
-        } else if (kind == "trace" && parts.size() >= 6) {
-            const auto owner = unquote(parts[1]);
-            auto& ws = app.workspaces_[owner];
-            ws.trace.push_back(TraceEvent{static_cast<Timestamp>(std::stoll(parts[2])), unquote(parts[3]), unquote(parts[4]), unquote(parts[5]), parts.size() > 6 ? unquote(parts[6]) : std::string{}});
-        } else if (kind == "computer_action" && parts.size() >= 9) {
-            const auto owner = unquote(parts[1]);
-            auto& ws = app.workspaces_[owner];
-            ws.computer_log.push_back({static_cast<Timestamp>(std::stoll(parts[2])), unquote(parts[3]), unquote(parts[4]), unquote(parts[5]), unquote(parts[6]), unquote(parts[7]), unquote(parts[8])});
         }
     }
 
-    if (!app.luo_os_root_.empty() && std::filesystem::exists(app.luo_os_root_)) {
-        app.luo_os_index_ = build_luo_index(app.luo_os_root_);
-    }
-    if (!app.active_user_.empty()) {
-        app.ensure_workspace_seeded();
-    }
     return true;
 }
 
-bool StateIO::save(const App& app) {
+bool StateIO::save_global(const App& app) {
     std::error_code ec;
     std::filesystem::create_directories(app.data_root_, ec);
     std::ofstream out(app.state_file());
@@ -688,22 +651,69 @@ bool StateIO::save(const App& app) {
     for (const auto& [username, user] : app.users_) {
         out << rowify({"user", escape_json(username), escape_json(user.password_hash), escape_json(user.email), serialize_consent(user.consent)}) << "\n";
     }
-    for (const auto& [owner, ws] : app.workspaces_) {
-        for (const auto& computer : ws.computers) {
-            out << rowify({"computer", escape_json(owner), escape_json(computer.id), escape_json(computer.label), escape_json(join(computer.surfaces, '|')), escape_json(computer.os)}) << "\n";
+    return true;
+}
+
+bool StateIO::load_workspace(App& app, std::string_view username) {
+    std::ifstream in(app.state_file());
+    if (!in) return false;
+
+    auto& ws = app.workspaces_[std::string(username)];
+    ws = Workspace{ws.consent};
+
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        const auto parts = split(line, '\t');
+        if (parts.empty()) continue;
+        const auto& kind = parts[0];
+        if (kind == "computer" && parts.size() >= 6 && unquote(parts[1]) == username) {
+            auto surfaces = split(unquote(parts[4]), '|');
+            ws.computers.push_back(ComputerRecord{unquote(parts[2]), unquote(parts[3]), unquote(parts[5]), surfaces, true});
+        } else if (kind == "task" && parts.size() >= 9 && unquote(parts[1]) == username) {
+            TaskRecord t;
+            t.id = unquote(parts[2]);
+            t.title = unquote(parts[3]);
+            t.description = unquote(parts[4]);
+            t.kind = unquote(parts[5]);
+            t.status = unquote(parts[6]);
+            t.owner = unquote(parts[1]);
+            t.step_cursor = static_cast<std::size_t>(std::stoull(parts[7]));
+            t.assigned_agents = split(unquote(parts[8]), '|');
+            ws.tasks.push_back(t);
+        } else if (kind == "agent" && parts.size() >= 6 && unquote(parts[1]) == username) {
+            ws.agents.push_back(AgentProfile{unquote(parts[2]), unquote(parts[3]), split(unquote(parts[4]), '|'), std::stoi(parts[5]), false, {}});
+        } else if (kind == "trace" && parts.size() >= 6 && unquote(parts[1]) == username) {
+            ws.trace.push_back(TraceEvent{static_cast<Timestamp>(std::stoll(parts[2])), unquote(parts[3]), unquote(parts[4]), unquote(parts[5]), parts.size() > 6 ? unquote(parts[6]) : std::string{}});
+        } else if (kind == "computer_action" && parts.size() >= 9 && unquote(parts[1]) == username) {
+            ws.computer_log.push_back(ComputerAction{static_cast<Timestamp>(std::stoll(parts[2])), unquote(parts[3]), unquote(parts[4]), unquote(parts[5]), unquote(parts[6]), unquote(parts[7]), unquote(parts[8])});
         }
-        for (const auto& agent : ws.agents) {
-            out << rowify({"agent", escape_json(owner), escape_json(agent.id), escape_json(agent.role), escape_json(join(agent.expertise, '|')), std::to_string(agent.capacity)}) << "\n";
-        }
-        for (const auto& task : ws.tasks) {
-            out << rowify({"task", escape_json(owner), escape_json(task.id), escape_json(task.title), escape_json(task.description), escape_json(task.kind), escape_json(task.status), std::to_string(task.step_cursor), escape_json(join(task.assigned_agents, '|'))}) << "\n";
-        }
-        for (const auto& event : ws.trace) {
-            out << rowify({"trace", escape_json(owner), std::to_string(event.created_at), escape_json(event.category), escape_json(event.actor), escape_json(event.action), escape_json(event.detail)}) << "\n";
-        }
-        for (const auto& action : ws.computer_log) {
-            out << rowify({"computer_action", escape_json(owner), std::to_string(action.created_at), escape_json(action.computer_id), escape_json(action.agent_id), escape_json(action.surface), escape_json(action.verb), escape_json(action.target), escape_json(action.detail)}) << "\n";
-        }
+    }
+
+    return true;
+}
+
+bool StateIO::save_workspace(const App& app, std::string_view username) {
+    std::error_code ec;
+    std::filesystem::create_directories(app.data_root_, ec);
+    std::ofstream out(app.state_file(), std::ios::app);
+    if (!out) return false;
+
+    const auto& ws = app.workspaces_.at(std::string(username));
+    for (const auto& computer : ws.computers) {
+        out << rowify({"computer", escape_json(std::string(username)), escape_json(computer.id), escape_json(computer.label), escape_json(join(computer.surfaces, '|')), escape_json(computer.os)}) << "\n";
+    }
+    for (const auto& agent : ws.agents) {
+        out << rowify({"agent", escape_json(std::string(username)), escape_json(agent.id), escape_json(agent.role), escape_json(join(agent.expertise, '|')), std::to_string(agent.capacity)}) << "\n";
+    }
+    for (const auto& task : ws.tasks) {
+        out << rowify({"task", escape_json(std::string(username)), escape_json(task.id), escape_json(task.title), escape_json(task.description), escape_json(task.kind), escape_json(task.status), std::to_string(task.step_cursor), escape_json(join(task.assigned_agents, '|'))}) << "\n";
+    }
+    for (const auto& event : ws.trace) {
+        out << rowify({"trace", escape_json(std::string(username)), std::to_string(event.created_at), escape_json(event.category), escape_json(event.actor), escape_json(event.action), escape_json(event.detail)}) << "\n";
+    }
+    for (const auto& action : ws.computer_log) {
+        out << rowify({"computer_action", escape_json(std::string(username)), std::to_string(action.created_at), escape_json(action.computer_id), escape_json(action.agent_id), escape_json(action.surface), escape_json(action.verb), escape_json(action.target), escape_json(action.detail)}) << "\n";
     }
     return true;
 }
