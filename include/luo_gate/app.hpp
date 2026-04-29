@@ -1,5 +1,7 @@
 #pragma once
 
+#include "luo_gate/luo_index.hpp"
+
 #include <cstdint>
 #include <filesystem>
 #include <map>
@@ -191,6 +193,9 @@ public:
     std::vector<ComputerAction> computer_log(std::size_t limit = 200) const;
     bool record_computer_action(std::string computer_id, std::string agent_id, std::string surface, std::string verb, std::string target, std::string detail);
 
+    std::vector<LuoIndexEntry> luo_index_entries(std::size_t limit = 200) const;
+    std::vector<LuoIndexEntry> search_luo_os(std::string_view query, std::size_t limit = 20) const;
+
     bool set_secret(std::string service, std::string value, std::string scope = "local");
     std::vector<SecretRecord> secrets() const;
 
@@ -234,6 +239,8 @@ private:
     static Timestamp now();
 
     std::filesystem::path data_root_;
+    std::filesystem::path luo_os_root_;
+    LuoIndex luo_os_index_;
     std::map<std::string, UserRecord> users_;
     std::map<std::string, Workspace> workspaces_;
     std::string active_user_;

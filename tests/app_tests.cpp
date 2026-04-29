@@ -4,7 +4,6 @@
 #include <cassert>
 #include <filesystem>
 #include <iostream>
-#include <random>
 
 int main() {
     using namespace luo_gate;
@@ -22,9 +21,15 @@ int main() {
     assert(app.computers().size() == 1);
     assert(app.attach_computer("desktop", "Desktop", "linux", {"computer", "browser", "terminal"}, true));
     assert(app.set_active_computer("desktop"));
-    assert(app.import_luo_os(std::filesystem::path("luo_os")) == false);
     assert(app.create_task("Build swarm", "Break work into roles", "build"));
     assert(app.tick());
+
+    const auto repo_root = std::filesystem::current_path().parent_path();
+    const auto luo_os_root = repo_root / "luo_os";
+    assert(std::filesystem::exists(luo_os_root));
+    assert(app.import_luo_os(luo_os_root));
+    assert(!app.luo_index_entries().empty());
+    assert(!app.search_luo_os("README").empty());
 
     assert(app.set_secret("search", "alpha-key"));
     assert(app.upload_file("brief.md", "task brief"));
@@ -35,7 +40,7 @@ int main() {
     const auto summary = app.summary();
     assert(summary.user_count == 1);
     assert(summary.agent_count >= 10000);
-    assert(summary.task_count == 1);
+    assert(summary.task_count >= 1);
     assert(summary.computer_count >= 1);
     assert(summary.secret_count == 1);
     assert(summary.file_count == 1);
@@ -46,7 +51,7 @@ int main() {
     const auto state = app.export_state();
     assert(state.find("\"users\":1") != std::string::npos);
     assert(state.find("\"agents\":") != std::string::npos);
-    assert(state.find("\"tasks\":1") != std::string::npos);
+    assert(state.find("\"tasks\":") != std::string::npos);
     assert(state.find("\"computers\":") != std::string::npos);
 
     const auto temp_root = std::filesystem::temp_directory_path() / "luo-computer-state-test";
@@ -56,6 +61,7 @@ int main() {
         assert(saved.register_user("Luo", "Gate"));
         assert(saved.login("Luo", "Gate"));
         assert(saved.attach_computer("desk", "Desk", "linux", {"computer", "browser"}, true));
+        assert(saved.import_luo_os(luo_os_root));
         assert(saved.create_task("Persist", "Save and reload", "build"));
         assert(saved.tick());
         assert(saved.save());
@@ -67,6 +73,8 @@ int main() {
         assert(loaded.login("Luo", "Gate"));
         assert(loaded.computers().size() >= 1);
         assert(loaded.tasks().size() >= 1);
+        assert(!loaded.luo_index_entries().empty());
+        assert(!loaded.search_luo_os("README").empty());
     }
     std::filesystem::remove_all(temp_root);
 

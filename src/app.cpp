@@ -3,6 +3,7 @@
 #include "luo_gate/security.hpp"
 #include "luo_gate/state_io.hpp"
 #include "luo_gate/state_store.hpp"
+#include "luo_gate/luo_index.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -524,6 +525,8 @@ bool StateIO::load(App& app) {
     app.users_.clear();
     app.workspaces_.clear();
     app.active_user_.clear();
+    app.luo_os_root_.clear();
+    app.luo_os_index_.entries.clear();
 
     std::string line;
     while (std::getline(in, line)) {
@@ -533,6 +536,8 @@ bool StateIO::load(App& app) {
         const auto& kind = parts[0];
         if (kind == "active_user" && parts.size() >= 2) {
             app.active_user_ = unquote(parts[1]);
+        } else if (kind == "luo_os_root" && parts.size() >= 2) {
+            app.luo_os_root_ = unquote(parts[1]);
         } else if (kind == "user" && parts.size() >= 5) {
             const auto username = unquote(parts[1]);
             const auto password_hash = unquote(parts[2]);
@@ -570,6 +575,9 @@ bool StateIO::load(App& app) {
         }
     }
 
+    if (!app.luo_os_root_.empty() && std::filesystem::exists(app.luo_os_root_)) {
+        app.luo_os_index_ = build_luo_index(app.luo_os_root_);
+    }
     if (!app.active_user_.empty()) {
         app.ensure_workspace_seeded();
     }
@@ -584,6 +592,7 @@ bool StateIO::save(const App& app) {
 
     out << "# luo-computer state\n";
     out << rowify({"active_user", escape_json(app.active_user_)}) << "\n";
+    out << rowify({"luo_os_root", escape_json(app.luo_os_root_.string())}) << "\n";
     for (const auto& [username, user] : app.users_) {
         out << rowify({"user", escape_json(username), escape_json(user.password_hash), escape_json(user.email), serialize_consent(user.consent)}) << "\n";
     }
@@ -613,9 +622,22 @@ bool App::add_trace(std::string category, std::string actor, std::string action,
     return true;
 }
 
+std::vector<LuoIndexEntry> App::luo_index_entries(std::size_t limit) const {
+    auto out = luo_os_index_.entries;
+    if (out.size() > limit) out.erase(out.begin(), out.end() - static_cast<std::ptrdiff_t>(limit));
+    return out;
+}
+
+std::vector<LuoIndexEntry> App::search_luo_os(std::string_view query, std::size_t limit) const {
+    return search_luo_index(luo_os_index_, query, limit);
+}
+
 bool App::import_luo_os(std::filesystem::path source_root) {
     if (active_user_.empty()) return false;
     if (!std::filesystem::exists(source_root)) return false;
+
+    luo_os_root_ = std::move(source_root);
+    luo_os_index_ = build_luo_index(luo_os_root_);
 
     auto& ws = workspace();
     const std::vector<std::pair<std::string, std::string>> focus = {
@@ -629,11 +651,19 @@ bool App::import_luo_os(std::filesystem::path source_root) {
     };
 
     for (const auto& [id, title] : focus) {
-        create_task("LUO OS: " + title, "Import and understand " + source_root.string() + " as the live computer workspace", "research");
+        create_task("LUO OS: " + title, "Import and understand " + luo_os_root_.string() + " as the live computer workspace", "research");
         record_trace("source", active_user_, "import", id + ":" + title);
     }
 
-    for (const auto& entry : std::filesystem::directory_iterator(source_root)) {
+    const auto matched = search_luo_index(luo_os_index_, "README", 6);
+    for (const auto& entry : matched) {
+        record_trace("source", active_user_, "index", entry.kind + ":" + entry.path);
+        if (entry.kind == "dir") {
+            create_task("Inspect " + entry.path, "Analyze LUO OS folder " + entry.path + " and map its responsibilities", "research");
+        }
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(luo_os_root_)) {
         if (!entry.is_directory()) continue;
         const auto name = entry.path().filename().string();
         const auto description = "Inspect the LUO OS subsystem folder: " + name;
@@ -641,7 +671,7 @@ bool App::import_luo_os(std::filesystem::path source_root) {
         record_computer_action(ws.active_computer_id.empty() ? std::string{"local-computer"} : ws.active_computer_id, "planner", "computer", "inspect", name, description);
     }
 
-    record_audit(active_user_, "import", "cloned LUO OS is now the live swarm workspace");
+    record_audit(active_user_, "import", "indexed " + std::to_string(luo_os_index_.entries.size()) + " LUO OS entries from " + luo_os_root_.string());
     touch();
     return true;
 }
