@@ -1,0 +1,23 @@
+[Unit]
+Description=Luo OS Voice Service
+After=network.target sound.target ollama.service
+Wants=ollama.service
+
+[Service]
+Type=simple
+User=%USER%
+WorkingDirectory=%LUO_DIR%
+ExecStart=%PYTHON% %LUO_DIR%/luo_cli.py voice
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Environment
+Environment="LUO_MODEL=mistral"
+
+# Audio device access
+SupplementaryGroups=audio
+
+[Install]
+WantedBy=multi-user.target

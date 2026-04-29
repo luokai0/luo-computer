@@ -1,0 +1,13 @@
+{
+    "name": "Luo AI",
+    "version": "0.1",
+    "model": "local",
+    "memory_limit": 1000,
+    "auto_start": true,
+    "permissions": {
+        "file_system": true,
+        "network": true,
+        "system_commands": true,
+        "ai_agents_api": true
+    }
+}

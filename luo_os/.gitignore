@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Secrets & environment
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# LuoOS runtime data
+logs/
+*.log
+
+# VS Code workspace (user data, not source)
+luo_workspace/
+
+# ChromaDB vector data (user-specific)
+chroma/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.o
+*.iso
+*.bin
+isodir/
+target/
+luowm/target/
+
+# Node
+node_modules/

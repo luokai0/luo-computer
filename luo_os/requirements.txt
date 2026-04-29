@@ -1,0 +1,22 @@
+# LuoOS — Dependencies
+# Only 2 packages required. Everything else is Python stdlib.
+# Run:  pip install -r requirements.txt
+#   or: python3 start.py   (auto-installs on first run)
+
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# ── Optional: enhanced memory search ──────────────────────────────
+# Uncomment for vector/semantic memory (adds ~500MB)
+# chromadb>=0.4.0
+# sentence-transformers>=2.2.0
+
+# ── Optional: voice interface ─────────────────────────────────────
+# Uncomment to enable 24/7 voice mode
+# pyaudio>=0.2.13
+# SpeechRecognition>=3.10.0
+# pyttsx3>=2.90
+# edge-tts>=6.1.9
+
+# ── Optional: system monitoring ──────────────────────────────────
+# psutil>=5.9.0

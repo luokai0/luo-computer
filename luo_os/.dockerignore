@@ -1,0 +1,11 @@
+target/
+luowm/target/
+*.o
+*.iso
+*.bin
+isodir/
+.git/
+agent/__pycache__/
+agent/agent.log
+agent/commands.json
+agent/results.json

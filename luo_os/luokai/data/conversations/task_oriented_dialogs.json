@@ -1,0 +1,338 @@
+[
+  {
+    "id": "tod_001",
+    "type": "task_oriented",
+    "domain": "customer_service",
+    "source": "DialogStudio-patterns",
+    "turns": [
+      {
+        "role": "user",
+        "content": "I ordered something 5 days ago and it still hasn't arrived."
+      },
+      {
+        "role": "assistant",
+        "content": "I'm sorry to hear that. Let me look into this for you. Can I get your order number?"
+      },
+      {
+        "role": "user",
+        "content": "It's ORD-48291."
+      },
+      {
+        "role": "assistant",
+        "content": "Thank you. I can see your order was shipped 4 days ago via standard delivery. The expected delivery window is 5-7 business days, so it should arrive within the next 1-2 days."
+      },
+      {
+        "role": "user",
+        "content": "Can I get it faster?"
+      },
+      {
+        "role": "assistant",
+        "content": "I can upgrade your shipping at no charge given the delay. It should arrive tomorrow if we do that now. Shall I proceed?"
+      },
+      {
+        "role": "user",
+        "content": "Yes please."
+      },
+      {
+        "role": "assistant",
+        "content": "Done. You'll receive a new tracking email within the hour. Is there anything else I can help with?"
+      }
+    ]
+  },
+  {
+    "id": "tod_002",
+    "type": "task_oriented",
+    "domain": "tech_support",
+    "source": "DialogStudio-patterns",
+    "turns": [
+      {
+        "role": "user",
+        "content": "My laptop won't connect to WiFi. It sees the network but fails when connecting."
+      },
+      {
+        "role": "assistant",
+        "content": "Let's troubleshoot this. First, try forgetting the network and reconnecting \u2014 go to WiFi settings, click on the network name, select Forget, then reconnect."
+      },
+      {
+        "role": "user",
+        "content": "I tried that. Still fails."
+      },
+      {
+        "role": "assistant",
+        "content": "Okay. Open Command Prompt as administrator and run: netsh winsock reset \u2014 then restart your laptop."
+      },
+      {
+        "role": "user",
+        "content": "That worked! It's connected now."
+      },
+      {
+        "role": "assistant",
+        "content": "Great. That resets the network stack which often resolves connection failures. If it happens again, the issue may be with your network driver \u2014 let me know."
+      }
+    ]
+  },
+  {
+    "id": "tod_003",
+    "type": "task_oriented",
+    "domain": "booking",
+    "source": "DialogStudio-patterns",
+    "turns": [
+      {
+        "role": "user",
+        "content": "I'd like to book a table for 4 people this Saturday evening."
+      },
+      {
+        "role": "assistant",
+        "content": "Happy to help with that. What time were you thinking, and do you have any dietary requirements I should note?"
+      },
+      {
+        "role": "user",
+        "content": "7pm would be ideal. One person is vegetarian."
+      },
+      {
+        "role": "assistant",
+        "content": "We have availability at 7pm on Saturday. I'll note one vegetarian. What name should I put the reservation under?"
+      },
+      {
+        "role": "user",
+        "content": "Sarah Chen."
+      },
+      {
+        "role": "assistant",
+        "content": "Perfect. Your table is reserved for 4 at 7pm this Saturday under Sarah Chen. You'll receive a confirmation email shortly. Is there anything else?"
+      }
+    ]
+  },
+  {
+    "id": "tod_004",
+    "type": "task_oriented",
+    "domain": "recommendation",
+    "source": "DialogStudio-patterns",
+    "turns": [
+      {
+        "role": "user",
+        "content": "I'm looking for a good book to read. I liked Atomic Habits."
+      },
+      {
+        "role": "assistant",
+        "content": "Great choice. Since you liked Atomic Habits, you'd probably enjoy The Power of Habit by Charles Duhigg \u2014 it covers similar ground with more narrative storytelling. Also Deep Work by Cal Newport."
+      },
+      {
+        "role": "user",
+        "content": "I've already read Deep Work. What else?"
+      },
+      {
+        "role": "assistant",
+        "content": "Then try 'Thinking, Fast and Slow' by Daniel Kahneman \u2014 it's about how we make decisions. Or 'Range' by David Epstein, which argues that generalist skills matter more than we think."
+      },
+      {
+        "role": "user",
+        "content": "Range sounds interesting. Is it easy to read?"
+      },
+      {
+        "role": "assistant",
+        "content": "Very readable. Epstein uses stories and examples throughout. It doesn't feel like a business book even though it has practical insights."
+      }
+    ]
+  },
+  {
+    "id": "tod_005",
+    "type": "task_oriented",
+    "domain": "tech_support",
+    "source": "DialogStudio-patterns",
+    "turns": [
+      {
+        "role": "user",
+        "content": "I forgot my password and can't reset it. The reset email isn't arriving."
+      },
+      {
+        "role": "assistant",
+        "content": "Let's check a few things. First, make sure you're checking the right email \u2014 the one registered with your account. Also check your spam folder."
+      },
+      {
+        "role": "user",
+        "content": "I checked spam. Nothing there either."
+      },
+      {
+        "role": "assistant",
+        "content": "Some email providers delay delivery. Can you try an alternative reset method \u2014 like answering security questions, or using your phone number if one is linked?"
+      },
+      {
+        "role": "user",
+        "content": "I have a phone number linked."
+      },
+      {
+        "role": "assistant",
+        "content": "Use that then. Select 'Send code to phone' on the login page. The SMS code usually arrives within 60 seconds."
+      }
+    ]
+  },
+  {
+    "id": "tod_006",
+    "type": "task_oriented",
+    "domain": "customer_service",
+    "source": "DialogStudio-patterns",
+    "turns": [
+      {
+        "role": "user",
+        "content": "I want to cancel my subscription."
+      },
+      {
+        "role": "assistant",
+        "content": "I'm sorry to hear you want to leave. Can I ask what's prompted the decision? I may be able to help."
+      },
+      {
+        "role": "user",
+        "content": "It's too expensive for what I get."
+      },
+      {
+        "role": "assistant",
+        "content": "I understand. Would a discounted plan work? I can offer you 30% off for the next 6 months \u2014 that brings you to about half the current price."
+      },
+      {
+        "role": "user",
+        "content": "What would that be per month?"
+      },
+      {
+        "role": "assistant",
+        "content": "Your current plan is $29/month. With the discount it would be $20.30/month for 6 months, then back to regular pricing."
+      },
+      {
+        "role": "user",
+        "content": "Okay, I'll stay with the discount."
+      },
+      {
+        "role": "assistant",
+        "content": "Great. I've applied the discount to your account starting today. You'll see it on your next billing cycle."
+      }
+    ]
+  },
+  {
+    "id": "tod_007",
+    "type": "task_oriented",
+    "domain": "information",
+    "source": "DialogStudio-patterns",
+    "turns": [
+      {
+        "role": "user",
+        "content": "What are the opening hours for the downtown branch?"
+      },
+      {
+        "role": "assistant",
+        "content": "The downtown branch is open Monday to Friday 9am-6pm, Saturday 10am-4pm. We're closed on Sundays and public holidays."
+      },
+      {
+        "role": "user",
+        "content": "Is parking available?"
+      },
+      {
+        "role": "assistant",
+        "content": "Yes, there's a public parking garage two blocks north on Oak Street. We validate parking for customers \u2014 just bring your ticket inside."
+      },
+      {
+        "role": "user",
+        "content": "Do I need an appointment or can I walk in?"
+      },
+      {
+        "role": "assistant",
+        "content": "Walk-ins are welcome, but for complex matters we recommend booking ahead. You can schedule online at our website or by calling the branch directly."
+      }
+    ]
+  },
+  {
+    "id": "tod_008",
+    "type": "task_oriented",
+    "domain": "coding_help",
+    "source": "DialogStudio-patterns",
+    "turns": [
+      {
+        "role": "user",
+        "content": "I'm getting a KeyError in Python. What does that mean?"
+      },
+      {
+        "role": "assistant",
+        "content": "A KeyError means you're trying to access a dictionary key that doesn't exist. For example: my_dict = {'a': 1} then my_dict['b'] raises KeyError: 'b'."
+      },
+      {
+        "role": "user",
+        "content": "How do I prevent it?"
+      },
+      {
+        "role": "assistant",
+        "content": "Two ways: use .get() which returns None if the key is missing \u2014 my_dict.get('b') \u2014 or check first with: if 'b' in my_dict: before accessing."
+      },
+      {
+        "role": "user",
+        "content": "Which is better?"
+      },
+      {
+        "role": "assistant",
+        "content": ".get() is more Pythonic and concise. Use it when missing keys are expected. Use 'in' check when you want to take different action depending on whether the key exists."
+      }
+    ]
+  },
+  {
+    "id": "tod_009",
+    "type": "task_oriented",
+    "domain": "coding_help",
+    "source": "DialogStudio-patterns",
+    "turns": [
+      {
+        "role": "user",
+        "content": "What's the difference between == and === in JavaScript?"
+      },
+      {
+        "role": "assistant",
+        "content": "== does loose equality \u2014 it converts types before comparing. === does strict equality \u2014 types must match too."
+      },
+      {
+        "role": "user",
+        "content": "Can you give an example?"
+      },
+      {
+        "role": "assistant",
+        "content": "Sure: 0 == false is true (both convert to 0), but 0 === false is false (number vs boolean). Also: '5' == 5 is true, but '5' === 5 is false."
+      },
+      {
+        "role": "user",
+        "content": "Which should I use?"
+      },
+      {
+        "role": "assistant",
+        "content": "Always use === by default. It prevents subtle bugs from unexpected type coercion. Only use == if you specifically want type-flexible comparison, which is rare."
+      }
+    ]
+  },
+  {
+    "id": "tod_010",
+    "type": "task_oriented",
+    "domain": "coding_help",
+    "source": "DialogStudio-patterns",
+    "turns": [
+      {
+        "role": "user",
+        "content": "How do I center a div in CSS?"
+      },
+      {
+        "role": "assistant",
+        "content": "The modern way is flexbox. On the parent: display: flex; align-items: center; justify-content: center; \u2014 this centers the child both horizontally and vertically."
+      },
+      {
+        "role": "user",
+        "content": "What if the parent doesn't have a fixed height?"
+      },
+      {
+        "role": "assistant",
+        "content": "Add height: 100vh to make it fill the viewport, or height: 100% if it's inside another element that has a height. Flexbox needs a defined height to center vertically."
+      },
+      {
+        "role": "user",
+        "content": "Is there a way without flexbox?"
+      },
+      {
+        "role": "assistant",
+        "content": "Yes \u2014 position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); on the child. But flexbox is cleaner and easier to maintain."
+      }
+    ]
+  }
+]

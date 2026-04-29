@@ -1,0 +1,24 @@
+[Unit]
+Description=Luo OS Web Server
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%USER%
+WorkingDirectory=%LUO_DIR%
+ExecStart=%PYTHON% %LUO_DIR%/luo_server.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Environment
+Environment="FLASK_ENV=production"
+Environment="LUO_MODEL=mistral"
+
+# Resource limits
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target

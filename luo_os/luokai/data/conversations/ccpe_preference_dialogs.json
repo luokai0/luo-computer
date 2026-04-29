@@ -1,0 +1,106 @@
+[
+  {
+    "id": "ccpe_001",
+    "type": "preference",
+    "domain": "movies",
+    "source": "CCPE-patterns",
+    "turns": [
+      {
+        "role": "user",
+        "content": "I'm looking for a movie to watch tonight."
+      },
+      {
+        "role": "assistant",
+        "content": "Happy to help! What kind of mood are you in? Action, comedy, drama, thriller?"
+      },
+      {
+        "role": "user",
+        "content": "Something thrilling but not too violent."
+      },
+      {
+        "role": "assistant",
+        "content": "How about a psychological thriller? Films like Gone Girl or Parasite fit that description well."
+      },
+      {
+        "role": "user",
+        "content": "I've seen Parasite. What about something newer?"
+      },
+      {
+        "role": "assistant",
+        "content": "Knives Out (2019) is excellent \u2014 witty, suspenseful, and no graphic violence. Or A Quiet Place for a different kind of tension."
+      },
+      {
+        "role": "user",
+        "content": "Knives Out sounds good. What's it about?"
+      },
+      {
+        "role": "assistant",
+        "content": "A famous crime novelist dies under mysterious circumstances and a detective investigates his eccentric family. It subverts the whodunit genre in a clever way."
+      }
+    ]
+  },
+  {
+    "id": "ccpe_002",
+    "type": "preference",
+    "domain": "music",
+    "source": "CCPE-patterns",
+    "turns": [
+      {
+        "role": "user",
+        "content": "I want to find new music. I usually listen to indie rock."
+      },
+      {
+        "role": "assistant",
+        "content": "Great taste. Are you looking for something similar to what you know, or something a bit different but still in that space?"
+      },
+      {
+        "role": "user",
+        "content": "Maybe something adjacent \u2014 slightly different but still guitar-driven."
+      },
+      {
+        "role": "assistant",
+        "content": "You might like Alvvays \u2014 dream pop with clear indie rock roots. Or Big Thief for something more folk-influenced but still guitar-forward."
+      },
+      {
+        "role": "user",
+        "content": "I've heard of Big Thief. What album should I start with?"
+      },
+      {
+        "role": "assistant",
+        "content": "Dragon New Warm Mountain I Believe in You (2022) is their most celebrated. It's a double album but every track is strong. Start with 'Certainty' or 'Promise Is a Pendulum'."
+      }
+    ]
+  },
+  {
+    "id": "ccpe_003",
+    "type": "preference",
+    "domain": "food",
+    "source": "CCPE-patterns",
+    "turns": [
+      {
+        "role": "user",
+        "content": "I want to try cooking something new this weekend. I usually make Italian food."
+      },
+      {
+        "role": "assistant",
+        "content": "Nice. Do you want to stay within European cuisines or try something from a different part of the world?"
+      },
+      {
+        "role": "user",
+        "content": "Something from further afield \u2014 maybe Asian?"
+      },
+      {
+        "role": "assistant",
+        "content": "Thai food is a great entry point \u2014 aromatic, fresh flavors, and most dishes come together quickly. A green curry or pad see ew would be achievable for a first try."
+      },
+      {
+        "role": "user",
+        "content": "What ingredients would I need that I might not have?"
+      },
+      {
+        "role": "assistant",
+        "content": "The key Thai pantry items are fish sauce, coconut milk, and a good curry paste. Most Asian grocery stores carry them, and they last a long time in the pantry."
+      }
+    ]
+  }
+]
