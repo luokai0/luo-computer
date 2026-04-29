@@ -121,9 +121,7 @@ std::string serialize_consent(const ConsentFlags& c) {
            (c.allow_analytics ? "1" : "0");
 }
 
-std::string default_state_text() {
-    return "";
-}
+std::string default_state_text() { return ""; }
 
 std::string rowify(const std::vector<std::string>& columns) {
     std::ostringstream out;
@@ -195,6 +193,30 @@ bool App::set_consent(ConsentFlags consent) {
     touch();
     return true;
 }
+
+bool App::start_session(std::string title, std::string note) {
+    if (active_user_.empty()) return false;
+    session_.resumed = false;
+    session_.title = std::move(title);
+    session_.note = std::move(note);
+    session_.last_started_at = now();
+    session_.last_resumed_at = 0;
+    record_audit(active_user_, "session", "started " + session_.title);
+    touch();
+    return true;
+}
+
+bool App::resume_session() {
+    if (active_user_.empty()) return false;
+    session_.resumed = true;
+    session_.last_resumed_at = now();
+    if (session_.title.empty()) session_.title = "Resume session";
+    record_audit(active_user_, "session", "resumed " + session_.title);
+    touch();
+    return true;
+}
+
+SessionState App::session_state() const { return session_; }
 
 bool App::add_agent(std::string id, std::string role, std::vector<std::string> expertise, int capacity) {
     if (active_user_.empty()) return false;
@@ -439,7 +461,13 @@ std::string App::export_state() const {
         << "\"devices\":" << s.device_count << ','
         << "\"audit\":" << s.audit_count << ','
         << "\"platform\":\"" << escape_json(s.platform) << "\","
-        << "\"active_user\":\"" << escape_json(s.active_user) << "\"}";
+        << "\"active_user\":\"" << escape_json(s.active_user) << "\","
+        << "\"session\":{"
+        << "\"resumed\":" << (session_.resumed ? "true" : "false") << ','
+        << "\"title\":\"" << escape_json(session_.title) << "\","
+        << "\"note\":\"" << escape_json(session_.note) << "\","
+        << "\"last_started_at\":" << session_.last_started_at << ','
+        << "\"last_resumed_at\":" << session_.last_resumed_at << "}}";
     return out.str();
 }
 
@@ -527,6 +555,7 @@ bool StateIO::load(App& app) {
     app.active_user_.clear();
     app.luo_os_root_.clear();
     app.luo_os_index_.entries.clear();
+    app.session_ = SessionState{};
 
     std::string line;
     while (std::getline(in, line)) {
@@ -538,6 +567,12 @@ bool StateIO::load(App& app) {
             app.active_user_ = unquote(parts[1]);
         } else if (kind == "luo_os_root" && parts.size() >= 2) {
             app.luo_os_root_ = unquote(parts[1]);
+        } else if (kind == "session" && parts.size() >= 6) {
+            app.session_.resumed = parts[1] == "1";
+            app.session_.title = unquote(parts[2]);
+            app.session_.note = unquote(parts[3]);
+            app.session_.last_started_at = std::stoll(parts[4]);
+            app.session_.last_resumed_at = std::stoll(parts[5]);
         } else if (kind == "user" && parts.size() >= 5) {
             const auto username = unquote(parts[1]);
             const auto password_hash = unquote(parts[2]);
@@ -593,6 +628,7 @@ bool StateIO::save(const App& app) {
     out << "# luo-computer state\n";
     out << rowify({"active_user", escape_json(app.active_user_)}) << "\n";
     out << rowify({"luo_os_root", escape_json(app.luo_os_root_.string())}) << "\n";
+    out << rowify({"session", app.session_.resumed ? "1" : "0", escape_json(app.session_.title), escape_json(app.session_.note), std::to_string(app.session_.last_started_at), std::to_string(app.session_.last_resumed_at)}) << "\n";
     for (const auto& [username, user] : app.users_) {
         out << rowify({"user", escape_json(username), escape_json(user.password_hash), escape_json(user.email), serialize_consent(user.consent)}) << "\n";
     }

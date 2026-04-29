@@ -156,6 +156,14 @@ struct Summary {
     std::map<std::string, std::size_t> role_counts;
 };
 
+struct SessionState {
+    bool resumed = false;
+    std::string title;
+    std::string note;
+    Timestamp last_started_at = 0;
+    Timestamp last_resumed_at = 0;
+};
+
 class App {
 public:
     explicit App(std::filesystem::path data_root = {});
@@ -174,6 +182,10 @@ public:
 
     ConsentFlags consent() const;
     bool set_consent(ConsentFlags consent);
+
+    bool start_session(std::string title, std::string note = {});
+    bool resume_session();
+    SessionState session_state() const;
 
     bool add_agent(std::string id, std::string role, std::vector<std::string> expertise = {}, int capacity = 100);
     bool create_task(std::string title, std::string description, std::string kind = "general");
@@ -241,6 +253,7 @@ private:
     std::filesystem::path data_root_;
     std::filesystem::path luo_os_root_;
     LuoIndex luo_os_index_;
+    SessionState session_;
     std::map<std::string, UserRecord> users_;
     std::map<std::string, Workspace> workspaces_;
     std::string active_user_;
