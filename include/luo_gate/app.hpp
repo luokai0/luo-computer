@@ -203,6 +203,7 @@ public:
     bool import_luo_os(std::filesystem::path source_root);
     std::vector<ComputerRecord> computers() const;
     std::vector<ComputerAction> computer_log(std::size_t limit = 200) const;
+    std::string active_computer_id() const;
     bool record_computer_action(std::string computer_id, std::string agent_id, std::string surface, std::string verb, std::string target, std::string detail);
 
     std::vector<LuoIndexEntry> luo_index_entries(std::size_t limit = 200) const;

@@ -14,6 +14,7 @@ add_library(luo_gate_core
     src/platform.cpp
     src/security.cpp
     src/server.cpp
+    src/startup.cpp
     src/state_store.cpp
     src/ui.cpp
 )

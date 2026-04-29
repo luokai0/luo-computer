@@ -347,6 +347,14 @@ std::vector<ComputerAction> App::computer_log(std::size_t limit) const {
     return out;
 }
 
+std::string App::active_computer_id() const {
+    if (active_user_.empty()) return {};
+    const auto& ws = workspace();
+    if (!ws.active_computer_id.empty()) return ws.active_computer_id;
+    if (!ws.computers.empty()) return ws.computers.front().id;
+    return default_computer_id();
+}
+
 bool App::record_computer_action(std::string computer_id, std::string agent_id, std::string surface, std::string verb, std::string target, std::string detail) {
     if (active_user_.empty()) return false;
     workspace().computer_log.push_back(ComputerAction{now(), std::move(computer_id), std::move(agent_id), std::move(surface), std::move(verb), std::move(target), std::move(detail)});
