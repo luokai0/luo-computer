@@ -148,6 +148,16 @@ void append_task_inspector(std::ostringstream& out, const App& app) {
         << "if(data.length) selectTask(0);"
         << "window.selectTask = selectTask;"
         << "})();</script>";
+    append_task_history(out, app);
+}
+
+void append_task_history(std::ostringstream& out, const App& app) {
+    out << "<div class='recent-activity'><h3>Task history</h3>"
+        << "<input id='task-history-filter' class='history-filter' placeholder='Search tasks...' type='text'>"
+        << "<div class='history-table-wrapper'><table id='task-history-table' class='history-table'><thead><tr><th>ID</th><th>Title</th><th>Status</th><th>Actions</th></tr></thead><tbody></tbody></table></div>"
+        << "<p class='history-note'>Buttons log to the console for now; hook them to backend actions when ready.</p>"
+        << "</div>"
+        << "<script>(function(){ const data = JSON.parse(document.getElementById('task-data').textContent || '[]'); const tbody = document.querySelector('#task-history-table tbody'); const filterInput = document.getElementById('task-history-filter'); function render(filter){ tbody.innerHTML=''; data.filter(t => !filter || t.id.toLowerCase().includes(filter) || t.title.toLowerCase().includes(filter)).forEach(task => { const row=document.createElement('tr'); row.innerHTML=`<td>${task.id}</td><td>${task.title}</td><td>${task.status}</td><td class='history-actions'><button type='button' data-id='${task.id}' class='pill'>Reopen</button><button type='button' data-id='${task.id}' class='pill'>Resume</button></td>`; tbody.appendChild(row); }); } function handleAction(event){ const id=event.target.dataset.id; if(!id) return; const action = event.target.textContent.trim(); console.log(`${action} clicked for ${id}`); } filterInput.addEventListener('input', () => render(filterInput.value.toLowerCase())); tbody.addEventListener('click', handleAction); render(''); })();</script>";
 }
 
 void append_computers(std::ostringstream& out, const App& app) {
@@ -253,6 +263,9 @@ std::string render_dashboard_html(const App& app) {
         << ".recent-activity .divider{margin:12px 0;border-top:1px solid #37405c}"
         << ".recent-activity{max-height:400px;overflow:auto}"
         << ".lead{margin:0 0 12px;font-weight:600;font-size:1.05rem;color:#98a9c7}"
+        << ".history-table{width:100%;border-collapse:collapse;}"
+        << ".history-filter{width:100%;padding:8px;border:1px solid #37405c;border-radius:8px;}"
+        << ".history-actions{display:flex;gap:8px;}"
         << "</style></head><body>";
     out << header("LUO COMPUTER")
         << "<p>Platform: " << html_escape(operating_system_name()) << " · Active: " << html_escape(app.current_user()) << "</p>"

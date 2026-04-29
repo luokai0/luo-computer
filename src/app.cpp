@@ -305,6 +305,29 @@ bool App::tick() {
     return progressed;
 }
 
+bool App::reopen_task(std::string task_id) {
+    if (active_user_.empty()) return false;
+    auto& ws = workspace();
+    auto it = std::find_if(ws.tasks.begin(), ws.tasks.end(), [&](const auto& t) { return t.id == task_id; });
+    if (it == ws.tasks.end() || it->status == "running") return false;
+    it->status = "queued";
+    it->step_cursor = 0;
+    it->assigned_agents = assign_agents(ws, it->required_roles, it->id);
+    record_audit(active_user_, "task", "reopened " + it->id);
+    touch();
+    return true;
+}
+
+bool App::resume_task(std::string task_id) {
+    if (active_user_.empty()) return false;
+    auto& ws = workspace();
+    auto it = std::find_if(ws.tasks.begin(), ws.tasks.end(), [&](const auto& t) { return t.id == task_id; });
+    if (it == ws.tasks.end()) return false;
+    it->status = "running";
+    tick();
+    return true;
+}
+
 std::vector<TaskRecord> App::tasks() const {
     return active_user_.empty() ? std::vector<TaskRecord>{} : workspace().tasks;
 }

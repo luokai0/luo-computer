@@ -221,6 +221,8 @@ public:
     bool add_agent(std::string id, std::string role, std::vector<std::string> expertise = {}, int capacity = 100);
     bool create_task(std::string title, std::string description, std::string kind = "general");
     bool tick();
+    bool reopen_task(std::string task_id);
+    bool resume_task(std::string task_id);
     std::vector<TaskRecord> tasks() const;
     std::vector<TaskStep> trace(std::size_t limit = 120) const;
     std::vector<TraceEvent> trace_events(std::size_t limit = 120) const;
