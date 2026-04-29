@@ -381,6 +381,8 @@ std::string App::active_computer_id() const {
 bool App::record_computer_action(std::string computer_id, std::string agent_id, std::string surface, std::string verb, std::string target, std::string detail) {
     if (active_user_.empty()) return false;
     workspace().computer_log.push_back(ComputerAction{now(), std::move(computer_id), std::move(agent_id), std::move(surface), std::move(verb), std::move(target), std::move(detail)});
+    record_trace("computer", active_user_, verb, detail);
+    touch();
     return true;
 }
 
@@ -647,6 +649,10 @@ bool StateIO::load(App& app) {
             const auto owner = unquote(parts[1]);
             auto& ws = app.workspaces_[owner];
             ws.trace.push_back(TraceEvent{static_cast<Timestamp>(std::stoll(parts[2])), unquote(parts[3]), unquote(parts[4]), unquote(parts[5]), parts.size() > 6 ? unquote(parts[6]) : std::string{}});
+        } else if (kind == "computer_action" && parts.size() >= 9) {
+            const auto owner = unquote(parts[1]);
+            auto& ws = app.workspaces_[owner];
+            ws.computer_log.push_back({static_cast<Timestamp>(std::stoll(parts[2])), unquote(parts[3]), unquote(parts[4]), unquote(parts[5]), unquote(parts[6]), unquote(parts[7]), unquote(parts[8])});
         }
     }
 
@@ -694,6 +700,9 @@ bool StateIO::save(const App& app) {
         }
         for (const auto& event : ws.trace) {
             out << rowify({"trace", escape_json(owner), std::to_string(event.created_at), escape_json(event.category), escape_json(event.actor), escape_json(event.action), escape_json(event.detail)}) << "\n";
+        }
+        for (const auto& action : ws.computer_log) {
+            out << rowify({"computer_action", escape_json(owner), std::to_string(action.created_at), escape_json(action.computer_id), escape_json(action.agent_id), escape_json(action.surface), escape_json(action.verb), escape_json(action.target), escape_json(action.detail)}) << "\n";
         }
     }
     return true;
