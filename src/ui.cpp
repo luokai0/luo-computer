@@ -192,6 +192,34 @@ void append_trace(std::ostringstream& out, const App& app) {
     out << "</div>";
 }
 
+void append_shortcuts(std::ostringstream& out, const App& app) {
+    out << "<div class='shortcut-group'>";
+    out << "<h3>Shortcuts</h3>";
+    out << "<div class='shortcut-grid'>";
+    out << "<button class='pill'>Create task</button>";
+    out << "<button class='pill'>Open file browser</button>";
+    out << "<button class='pill'>Show agent roster</button>";
+    out << "<button class='pill'>Launch project runner</button>";
+    out << "</div></div>";
+}
+
+void append_recent_activity(std::ostringstream& out, const App& app) {
+    out << "<div class='recent-activity'><h3>Recent activity</h3>";
+    const auto traces = app.trace_events(12);
+    const auto log = app.computer_log(12);
+    for (const auto& e : traces) {
+        out << "<div class='pill'><strong>" << html_escape(e.actor) << "</strong> " << html_escape(e.action) << " — " << html_escape(e.detail) << "</div>";
+    }
+    out << "<div class='divider'></div>";
+    for (const auto& a : log) {
+        out << "<div class='pill'>" << html_escape(a.agent_id) << " on " << html_escape(a.surface) << " · " << html_escape(a.verb) << " " << html_escape(a.target) << "</div>";
+    }
+    if (traces.empty() && log.empty()) {
+        out << "<div class='pill'>No activity yet.</div>";
+    }
+    out << "</div>";
+}
+
 void append_computer_playback(std::ostringstream& out, const App& app) {
     out << "<div class='trace'>";
     const auto log = app.computer_log(24);
@@ -213,31 +241,38 @@ std::string render_dashboard_html(const App& app) {
     out << "<!doctype html><html><head><meta charset='utf-8'><title>LUO COMPUTER</title>"
         << "<style>body{font-family:system-ui;background:#0b1020;color:#e6edf3;margin:0;padding:24px}"
         << ".grid{display:grid;grid-template-columns:240px 1fr 340px;gap:16px;align-items:start}"
+        << ".grid-home{grid-template-columns:280px 1fr 320px;}"
         << ".card{background:#121a33;border:1px solid #243155;border-radius:16px;padding:16px}"
         << ".pill{display:block;padding:8px 10px;border-radius:12px;background:#243155;margin:6px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:none;color:#e6edf3;text-align:left;width:100%}"
         << ".task-shell{display:grid;grid-template-columns:1fr 1.2fr;gap:12px}"
         << ".task-list,.trace,.list{max-height:320px;overflow:auto}"
         << ".task-inspector-panel{background:#0f1730;border:1px solid #243155;border-radius:14px;padding:12px;min-height:280px}"
         << ".group{background:#2e6b8a}"
+        << ".shortcut-group{margin-top:16px}"
+        << ".shortcut-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;text-align:left}"
+        << ".recent-activity .divider{margin:12px 0;border-top:1px solid #37405c}"
+        << ".recent-activity{max-height:400px;overflow:auto}"
+        << ".lead{margin:0 0 12px;font-weight:600;font-size:1.05rem;color:#98a9c7}"
         << "</style></head><body>";
     out << header("LUO COMPUTER")
         << "<p>Platform: " << html_escape(operating_system_name()) << " · Active: " << html_escape(app.current_user()) << "</p>"
-        << "<div class='grid'>"
-        << "<section class='card'><h3>Swarm</h3><p>Agents: " << s.agent_count << "</p><p>Tasks: " << s.task_count << "</p><p>Roles: ";
-    for (const auto& [role, count] : s.role_counts) out << "<span class='pill'>" << html_escape(role) << ": " << count << "</span>";
-    out << "</p><p>Computer: " << s.computer_count << "</p><p>Imported LUO OS: active</p></section>"
-        << "<section class='card'><h3>Tasks</h3>";
+        << "<p class='lead'>A home dashboard that keeps summaries, shortcuts, and recent activity in view.</p>"
+        << "<div class='grid grid-home'>"
+        << "<section class='card'>"
+        << "<h3>Control center</h3>";
+    append_summary(out, app);
+    append_shortcuts(out, app);
+    out << "</section>"
+        << "<section class='card'>";
     append_task_inspector(out, app);
-    out << "<h3>Computer surfaces</h3>";
     append_computers(out, app);
-    out << "<h3>LUO OS tree</h3>";
     append_luo_tree(out, app);
-    out << "<h3>LUO OS index</h3>";
     append_luo_index(out, app);
-    out << "</section><section class='card'><h3>Vault</h3><p>Secrets: " << s.secret_count << "</p><p>Files: " << s.file_count << "</p><p>Skills: " << s.skill_count << "</p></section></div>";
-    out << "<section class='card' style='margin-top:16px'><h3>Visible trace</h3>";
-    append_trace(out, app);
-    out << "<h3>Computer Playback</h3><p>computer actions timeline</p>";
+    out << "</section>"
+        << "<section class='card'>";
+    append_recent_activity(out, app);
+    out << "</section></div>";
+    out << "<section class='card' style='margin-top:16px'><h3>Computer Playback</h3><p>computer actions timeline</p>";
     append_computer_playback(out, app);
     out << "</section></body></html>";
     return out.str();
