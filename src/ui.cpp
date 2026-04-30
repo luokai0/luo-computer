@@ -113,6 +113,8 @@ void append_tasks(std::ostringstream& out, const App& app) {
     out << "</div>";
 }
 
+void append_task_history(std::ostringstream& out, const App& app);
+
 void append_task_inspector(std::ostringstream& out, const App& app) {
     out << "<div class='task-shell'>"
         << "<div class='task-list-panel'>"
@@ -169,7 +171,7 @@ void append_computers(std::ostringstream& out, const App& app) {
 }
 
 void append_luo_index(std::ostringstream& out, const App& app) {
-    out << "<div class='list'>";
+    out << "<h3>LUO OS index</h3><div class='list'>";
     for (const auto& entry : app.luo_index_entries(20)) {
         out << "<div class='pill'>" << html_escape(entry.kind) << " · " << html_escape(entry.path) << "</div>";
     }
@@ -177,7 +179,7 @@ void append_luo_index(std::ostringstream& out, const App& app) {
 }
 
 void append_luo_tree(std::ostringstream& out, const App& app) {
-    out << "<div class='list'>";
+    out << "<h3>LUO OS tree</h3><div class='list'>";
     const auto entries = app.search_luo_os("", 200);
     std::string last_group;
     for (const auto& entry : entries) {

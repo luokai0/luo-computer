@@ -139,6 +139,13 @@ struct ApprovalRecord {
     Timestamp granted_at = 0;
 };
 
+struct AgentMessage {
+    std::string agent_id;
+    std::string category;
+    std::string content;
+    Timestamp created_at = 0;
+};
+
 struct Workspace {
     ConsentFlags consent;
     std::vector<AgentProfile> agents;
@@ -156,13 +163,6 @@ struct Workspace {
     std::vector<AgentMessage> inbox;
     std::vector<ApprovalRecord> approvals;
     std::vector<std::string> pending_approvals;
-};
-
-struct AgentMessage {
-    std::string agent_id;
-    std::string category;
-    std::string content;
-    Timestamp created_at = 0;
 };
 
 struct Summary {
@@ -183,26 +183,6 @@ struct Summary {
 
 enum class SessionStage { Idle, Starting, Running, Paused, Failed, Resumed };
 
-inline const char* session_stage_to_string(SessionStage stage) {
-    switch (stage) {
-        case SessionStage::Idle: return "idle";
-        case SessionStage::Starting: return "starting";
-        case SessionStage::Running: return "running";
-        case SessionStage::Paused: return "paused";
-        case SessionStage::Failed: return "failed";
-        case SessionStage::Resumed: return "resumed";
-    }
-    return "idle";
-}
-
-inline SessionStage session_stage_from_string(std::string_view text) {
-    if (text == "starting") return SessionStage::Starting;
-    if (text == "running") return SessionStage::Running;
-    if (text == "paused") return SessionStage::Paused;
-    if (text == "failed") return SessionStage::Failed;
-    if (text == "resumed") return SessionStage::Resumed;
-    return SessionStage::Idle;
-}
 
 struct SessionState {
     bool resumed = false;
@@ -227,6 +207,9 @@ public:
 
     bool register_user(std::string username, std::string password, std::string email = {}, ConsentFlags consent = {});
     bool login(std::string_view username, std::string_view password);
+    void logout();
+    bool authenticated() const;
+    std::string current_user() const;
     bool export_user_settings(const std::filesystem::path& destination) const;
     bool import_user_settings(const std::filesystem::path& source);
     bool reset_workspace();
@@ -259,6 +242,7 @@ public:
     bool attach_computer(std::string id, std::string label, std::string os = {}, std::vector<std::string> surfaces = {}, bool active = true);
     bool set_active_computer(std::string_view id);
     bool import_luo_os(std::filesystem::path source_root);
+    bool rebuild_luo_index();  // Reload index from existing luo_os_root without creating tasks
     std::vector<ComputerRecord> computers() const;
     std::vector<ComputerAction> computer_log(std::size_t limit = 200) const;
     std::string active_computer_id() const;

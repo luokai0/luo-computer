@@ -1,5 +1,6 @@
 #include "luo_gate/startup.hpp"
 #include "luo_gate/platform.hpp"
+#include "luo_gate/server.hpp"
 
 #include <algorithm>
 #include <array>
@@ -127,7 +128,7 @@ bool StartupFlow::confirm(std::string_view label, bool default_yes) {
     std::string answer;
     std::getline(in_, answer);
     if (answer.empty()) return default_yes;
-    const auto lower = std::string(answer);
+    std::string lower = std::string(answer);
     std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return lower == "y" || lower == "yes";
 }
@@ -208,7 +209,7 @@ bool StartupFlow::task_creation_flow() {
         out_ << "Could not create task.\n";
         return false;
     }
-    app_.record_trace("task", "planner", "templated", title + ": " + category);
+    app_.add_trace("task", "planner", "templated", std::string(title) + ": " + category);
     out_ << "Created templated task: " << title << "\n";
     return true;
 }

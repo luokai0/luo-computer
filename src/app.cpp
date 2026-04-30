@@ -166,6 +166,10 @@ std::string rowify(const std::vector<std::string>& columns) {
     return out.str();
 }
 
+std::string rowify(std::initializer_list<std::string> columns) {
+    return rowify(std::vector<std::string>(columns));
+}
+
 std::optional<AgentProfile> parse_agent_line(std::string_view line) {
     const auto trimmed = trim(line);
     if (trimmed.empty() || trimmed.rfind("#", 0) == 0) return std::nullopt;
@@ -842,11 +846,11 @@ bool App::reset_workspace() {
 }
 
 std::filesystem::path global_state_file(const App& app) {
-    return app.data_root_ / "state.tsv";
+    return app.data_root() / "state.tsv";
 }
 
 std::filesystem::path user_state_file(const App& app, std::string_view username) {
-    return app.data_root_ / "users" / (std::string(username) + ".tsv");
+    return app.data_root() / "users" / (std::string(username) + ".tsv");
 }
 
 std::filesystem::path App::state_file() const { return global_state_file(*this); }
@@ -1034,6 +1038,12 @@ std::vector<LuoIndexEntry> App::luo_index_entries(std::size_t limit) const {
 
 std::vector<LuoIndexEntry> App::search_luo_os(std::string_view query, std::size_t limit) const {
     return search_luo_index(luo_os_index_, query, limit);
+}
+
+bool App::rebuild_luo_index() {
+    if (luo_os_root_.empty() || !std::filesystem::exists(luo_os_root_)) return false;
+    luo_os_index_ = build_luo_index(luo_os_root_);
+    return !luo_os_index_.entries.empty();
 }
 
 bool App::import_luo_os(std::filesystem::path source_root) {
