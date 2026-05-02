@@ -24,7 +24,7 @@ bool is_valid_username(std::string_view username) {
 }
 
 bool is_valid_password(std::string_view password) {
-    return password.size() >= 3 && password.size() <= 6 && alpha_only(password);
+    return password.size() >= 3 && password.size() <= 128;
 }
 
 std::string password_hash(std::string_view username, std::string_view password) {

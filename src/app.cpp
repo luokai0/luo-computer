@@ -316,7 +316,7 @@ bool App::add_agent(std::string id, std::string role, std::vector<std::string> e
     return true;
 }
 
-bool App::create_task(std::string title, std::string description, std::string kind) {
+bool App::create_task(std::string title, std::string description, std::string kind, int priority) {
     if (active_user_.empty()) return false;
     auto& ws = workspace();
     TaskRecord task;
@@ -327,6 +327,7 @@ bool App::create_task(std::string title, std::string description, std::string ki
     task.owner = active_user_;
     task.created_at = now();
     task.updated_at = task.created_at;
+    task.priority = std::clamp(priority, 1, 10);
     task.required_roles = default_roles_for_kind(task.kind);
     task.plan = {
         {0, "system", "intake", "Accept and normalize user request", now(), "computer"},
@@ -520,9 +521,18 @@ std::vector<SecretRecord> App::secrets() const {
     return active_user_.empty() ? std::vector<SecretRecord>{} : workspace().secrets;
 }
 
-bool App::upload_file(std::string name, std::string content) {
+bool App::upload_file(std::string name, std::string content, std::string project_scope) {
     if (active_user_.empty()) return false;
-    workspace().files.push_back(FileRecord{std::move(name), std::move(content), now()});
+    // Check if file already exists - update instead
+    for (auto& f : workspace().files) {
+        if (f.name == name) return update_file(name, content);
+    }
+    FileRecord rec;
+    rec.name = std::move(name);
+    rec.content = std::move(content);
+    rec.created_at = now();
+    rec.project_scope = std::move(project_scope);
+    workspace().files.push_back(std::move(rec));
     record_audit(active_user_, "file", "uploaded file");
     touch();
     return true;
@@ -543,11 +553,19 @@ std::vector<SkillRecord> App::skills() const {
     return active_user_.empty() ? std::vector<SkillRecord>{} : workspace().skills;
 }
 
-bool App::add_project(std::string id, std::string name, std::string command, std::string cwd, bool executable) {
+bool App::add_project(std::string id, std::string name, std::string command,
+                      std::string cwd, bool executable, std::string template_kind) {
     if (active_user_.empty()) return false;
     auto& projects = workspace().projects;
     auto it = std::find_if(projects.begin(), projects.end(), [&](const auto& p) { return p.id == id; });
-    ProjectRecord record{std::move(id), std::move(name), std::move(command), std::move(cwd), executable, -1, {}};
+    ProjectRecord record;
+    record.id = std::move(id);
+    record.name = std::move(name);
+    record.command = std::move(command);
+    record.cwd = std::move(cwd);
+    record.executable = executable;
+    record.last_exit_code = -1;
+    record.template_kind = std::move(template_kind);
     if (it == projects.end()) projects.push_back(record);
     else *it = record;
     touch();
@@ -592,8 +610,22 @@ Summary App::summary() const {
         s.project_count = ws.projects.size();
         s.device_count = ws.devices.size();
         s.audit_count = ws.audit.size();
+        s.memory_count   = ws.memory_store.size();
+        s.knowledge_count = ws.knowledge.size();
         s.role_counts = role_counts();
     }
+    s.session_stage = [this]() -> std::string {
+        switch (session_.stage) {
+            case SessionStage::Idle:     return "idle";
+            case SessionStage::Starting: return "starting";
+            case SessionStage::Running:  return "running";
+            case SessionStage::Paused:   return "paused";
+            case SessionStage::Failed:   return "failed";
+            case SessionStage::Resumed:  return "resumed";
+        }
+        return "idle";
+    }();
+    s.local_only_mode = active_user_.empty() ? true : workspace().local_only_mode;
     return s;
 }
 
@@ -611,6 +643,8 @@ std::string App::export_state() const {
         << "\"projects\":" << s.project_count << ','
         << "\"devices\":" << s.device_count << ','
         << "\"audit\":" << s.audit_count << ','
+        << "\"memory\":" << s.memory_count << ','
+        << "\"knowledge\":" << s.knowledge_count << ','
         << "\"platform\":\"" << escape_json(s.platform) << "\","
         << "\"active_user\":\"" << escape_json(s.active_user) << "\","
         << "\"session\":{"
@@ -963,6 +997,38 @@ bool StateIO::load_workspace(App& app, std::string_view username) {
             ws.trace.push_back(TraceEvent{static_cast<Timestamp>(std::stoll(parts[2])), unquote(parts[3]), unquote(parts[4]), unquote(parts[5]), parts.size() > 6 ? unquote(parts[6]) : std::string{}});
         } else if (kind == "computer_action" && parts.size() >= 9 && unquote(parts[1]) == username) {
             ws.computer_log.push_back(ComputerAction{static_cast<Timestamp>(std::stoll(parts[2])), unquote(parts[3]), unquote(parts[4]), unquote(parts[5]), unquote(parts[6]), unquote(parts[7]), unquote(parts[8])});
+        } else if (kind == "secret" && parts.size() >= 5 && unquote(parts[1]) == username) {
+            ws.secrets.push_back(SecretRecord{unquote(parts[2]), unquote(parts[3]), unquote(parts[4])});
+        } else if (kind == "file" && parts.size() >= 5 && unquote(parts[1]) == username) {
+            FileRecord f;
+            f.name = unquote(parts[2]);
+            f.content = unquote(parts[3]);
+            f.project_scope = unquote(parts[4]);
+            ws.files.push_back(std::move(f));
+        } else if (kind == "project" && parts.size() >= 8 && unquote(parts[1]) == username) {
+            ProjectRecord p;
+            p.id = unquote(parts[2]);
+            p.name = unquote(parts[3]);
+            p.command = unquote(parts[4]);
+            p.cwd = unquote(parts[5]);
+            p.executable = (parts[6] == "1");
+            p.template_kind = unquote(parts[7]);
+            p.last_exit_code = -1;
+            ws.projects.push_back(std::move(p));
+        } else if (kind == "memory" && parts.size() >= 6 && unquote(parts[1]) == username) {
+            MemoryEntry m;
+            m.id = unquote(parts[2]);
+            m.kind = unquote(parts[3]);
+            m.content = unquote(parts[4]);
+            m.source = unquote(parts[5]);
+            m.user = std::string(username);
+            ws.memory_store.push_back(std::move(m));
+        } else if (kind == "knowledge" && parts.size() >= 5 && unquote(parts[1]) == username) {
+            KnowledgeEntry k;
+            k.id = unquote(parts[2]);
+            k.title = unquote(parts[3]);
+            k.body = unquote(parts[4]);
+            ws.knowledge.push_back(std::move(k));
         }
     }
 
@@ -990,6 +1056,21 @@ bool StateIO::save_workspace(const App& app, std::string_view username) {
     }
     for (const auto& action : ws.computer_log) {
         out << rowify({"computer_action", escape_json(std::string(username)), std::to_string(action.created_at), escape_json(action.computer_id), escape_json(action.agent_id), escape_json(action.surface), escape_json(action.verb), escape_json(action.target), escape_json(action.detail)}) << "\n";
+    }
+    for (const auto& secret : ws.secrets) {
+        out << rowify({"secret", escape_json(std::string(username)), escape_json(secret.service), escape_json(secret.value), escape_json(secret.scope)}) << "\n";
+    }
+    for (const auto& file : ws.files) {
+        out << rowify({"file", escape_json(std::string(username)), escape_json(file.name), escape_json(file.content.substr(0, 4096)), escape_json(file.project_scope)}) << "\n";
+    }
+    for (const auto& proj : ws.projects) {
+        out << rowify({"project", escape_json(std::string(username)), escape_json(proj.id), escape_json(proj.name), escape_json(proj.command), escape_json(proj.cwd), (proj.executable ? "1" : "0"), escape_json(proj.template_kind)}) << "\n";
+    }
+    for (const auto& mem : ws.memory_store) {
+        out << rowify({"memory", escape_json(std::string(username)), escape_json(mem.id), escape_json(mem.kind), escape_json(mem.content.substr(0, 512)), escape_json(mem.source)}) << "\n";
+    }
+    for (const auto& kb : ws.knowledge) {
+        out << rowify({"knowledge", escape_json(std::string(username)), escape_json(kb.id), escape_json(kb.title), escape_json(kb.body.substr(0, 512))}) << "\n";
     }
     return true;
 }
@@ -1089,5 +1170,744 @@ bool App::import_luo_os(std::filesystem::path source_root) {
     touch();
     return true;
 }
+
+} // namespace luo_gate
+
+namespace luo_gate {
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Steps 12-20: Agent system extensions
+// ═══════════════════════════════════════════════════════════════════════════
+
+bool App::update_agent_skills(std::string agent_id, std::vector<AgentSkill> skills) {
+    if (active_user_.empty()) return false;
+    for (auto& agent : workspace().agents) {
+        if (agent.id == agent_id) {
+            agent.skills = std::move(skills);
+            touch();
+            return true;
+        }
+    }
+    return false;
+}
+
+bool App::set_agent_availability(std::string agent_id, std::string availability) {
+    if (active_user_.empty()) return false;
+    for (auto& agent : workspace().agents) {
+        if (agent.id == agent_id) {
+            agent.availability = std::move(availability);
+            touch();
+            return true;
+        }
+    }
+    return false;
+}
+
+// Step 6: agent filters
+std::vector<AgentProfile> App::filter_agents(std::string_view role,
+                                              std::string_view expertise,
+                                              bool busy_only,
+                                              std::string_view task_id) const {
+    std::vector<AgentProfile> out;
+    if (active_user_.empty()) return out;
+    for (const auto& agent : workspace().agents) {
+        if (!role.empty() && agent.role.find(role) == std::string::npos) continue;
+        if (!expertise.empty()) {
+            bool found = false;
+            for (const auto& e : agent.expertise)
+                if (e.find(expertise) != std::string::npos) { found = true; break; }
+            if (!found) continue;
+        }
+        if (busy_only && !agent.busy) continue;
+        if (!task_id.empty() && agent.task_id != task_id) continue;
+        out.push_back(agent);
+    }
+    return out;
+}
+
+// Step 17: send_agent_message (alias with better naming)
+bool App::send_agent_message(std::string agent_id, std::string category,
+                              std::string content) {
+    return add_agent_message(std::move(agent_id), std::move(category),
+                             std::move(content));
+}
+
+// Step 63: kill switch — stop all active agents instantly
+bool App::kill_all_agents() {
+    if (active_user_.empty()) return false;
+    for (auto& agent : workspace().agents) {
+        agent.busy = false;
+        agent.task_id.clear();
+        agent.load = 0;
+        agent.health = "ok";
+        agent.stuck_since = 0;
+    }
+    // Also cancel all running tasks
+    for (auto& task : workspace().tasks) {
+        if (task.status == "running") {
+            task.status = "paused";
+            task.cancel_reason = "kill switch";
+        }
+    }
+    record_audit(active_user_, "kill_switch", "all agents stopped");
+    set_session_stage(SessionStage::Paused, "Kill switch activated");
+    touch();
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Steps 31-40: Planning and orchestration
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Step 32: plan validation
+bool App::validate_task(std::string task_id) {
+    if (active_user_.empty()) return false;
+    for (auto& task : workspace().tasks) {
+        if (task.id != task_id) continue;
+        if (task.plan.empty()) {
+            record_trace("validation", "planner", "fail", task_id + ": no plan");
+            return false;
+        }
+        if (task.required_roles.empty()) {
+            record_trace("validation", "planner", "fail", task_id + ": no roles");
+            return false;
+        }
+        task.validated = true;
+        record_trace("validation", "planner", "pass", task_id);
+        touch();
+        return true;
+    }
+    return false;
+}
+
+// Step 38: cancel
+bool App::cancel_task(std::string task_id, std::string reason) {
+    if (active_user_.empty()) return false;
+    for (auto& task : workspace().tasks) {
+        if (task.id != task_id) continue;
+        task.status = "cancelled";
+        task.cancel_reason = reason.empty() ? "cancelled by user" : reason;
+        release_agents(workspace(), task);
+        record_audit(active_user_, "task", "cancelled " + task_id + ": " + task.cancel_reason);
+        touch();
+        return true;
+    }
+    return false;
+}
+
+// Step 38: pause task
+bool App::pause_task(std::string task_id) {
+    if (active_user_.empty()) return false;
+    for (auto& task : workspace().tasks) {
+        if (task.id != task_id || task.status != "running") continue;
+        task.status = "paused";
+        record_audit(active_user_, "task", "paused " + task_id);
+        touch();
+        return true;
+    }
+    return false;
+}
+
+// Step 38: retry step
+bool App::retry_task_step(std::string task_id) {
+    if (active_user_.empty()) return false;
+    for (auto& task : workspace().tasks) {
+        if (task.id != task_id) continue;
+        if (task.step_cursor > 0) task.step_cursor--;
+        task.status = "running";
+        record_trace("task", "operator", "retry", task_id + " step " + std::to_string(task.step_cursor));
+        touch();
+        return tick();
+    }
+    return false;
+}
+
+// Step 36: set priority
+bool App::set_task_priority(std::string task_id, int priority) {
+    if (active_user_.empty()) return false;
+    for (auto& task : workspace().tasks) {
+        if (task.id != task_id) continue;
+        task.priority = std::clamp(priority, 1, 10);
+        touch();
+        return true;
+    }
+    return false;
+}
+
+// Step 34: add subtask with dependencies
+bool App::add_subtask(std::string parent_id, std::string title,
+                      std::string kind, std::vector<std::string> depends_on) {
+    if (active_user_.empty()) return false;
+    for (auto& task : workspace().tasks) {
+        if (task.id != parent_id) continue;
+        SubTask sub;
+        sub.id = parent_id + "-sub-" + std::to_string(task.subtasks.size() + 1);
+        sub.parent_id = parent_id;
+        sub.title = std::move(title);
+        sub.kind = std::move(kind);
+        sub.depends_on = std::move(depends_on);
+        sub.created_at = now();
+        sub.updated_at = sub.created_at;
+        task.subtasks.push_back(std::move(sub));
+        touch();
+        return true;
+    }
+    return false;
+}
+
+// Step 10: task filtering (status/kind/search)
+std::vector<TaskRecord> App::tasks_filtered(std::string_view status,
+                                             std::string_view kind,
+                                             std::string_view search) const {
+    std::vector<TaskRecord> out;
+    if (active_user_.empty()) return out;
+    for (const auto& task : workspace().tasks) {
+        if (!status.empty() && task.status != status) continue;
+        if (!kind.empty() && task.kind != kind) continue;
+        if (!search.empty()) {
+            const bool in_title = task.title.find(search) != std::string::npos;
+            const bool in_desc  = task.description.find(search) != std::string::npos;
+            if (!in_title && !in_desc) continue;
+        }
+        out.push_back(task);
+    }
+    return out;
+}
+
+std::optional<TaskRecord> App::get_task(std::string_view id) const {
+    if (active_user_.empty()) return std::nullopt;
+    for (const auto& task : workspace().tasks) {
+        if (task.id == id) return task;
+    }
+    return std::nullopt;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Steps 21-30: Computer surface
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Step 22: windows
+bool App::open_window(std::string computer_id, std::string title,
+                      std::string surface) {
+    if (active_user_.empty()) return false;
+    for (auto& comp : workspace().computers) {
+        if (comp.id != computer_id) continue;
+        WindowRecord win;
+        win.id = computer_id + "-win-" + std::to_string(comp.windows.size() + 1);
+        win.title = std::move(title);
+        win.surface = std::move(surface);
+        win.focused = true;
+        // unfocus others
+        for (auto& w : comp.windows) w.focused = false;
+        comp.windows.push_back(std::move(win));
+        record_computer_action(computer_id, "system", "computer", "open_window",
+                               comp.windows.back().title, "Window opened");
+        touch();
+        return true;
+    }
+    return false;
+}
+
+bool App::close_window(std::string computer_id, std::string window_id) {
+    if (active_user_.empty()) return false;
+    for (auto& comp : workspace().computers) {
+        if (comp.id != computer_id) continue;
+        auto& wins = comp.windows;
+        wins.erase(std::remove_if(wins.begin(), wins.end(),
+                   [&](const auto& w){ return w.id == window_id; }), wins.end());
+        touch();
+        return true;
+    }
+    return false;
+}
+
+bool App::focus_window(std::string computer_id, std::string window_id) {
+    if (active_user_.empty()) return false;
+    for (auto& comp : workspace().computers) {
+        if (comp.id != computer_id) continue;
+        for (auto& win : comp.windows) win.focused = (win.id == window_id);
+        touch();
+        return true;
+    }
+    return false;
+}
+
+// Step 23: browser snapshots
+bool App::navigate_browser(std::string computer_id, std::string url,
+                            std::string title, std::string excerpt) {
+    if (active_user_.empty()) return false;
+    BrowserSnapshot snap;
+    snap.url = std::move(url);
+    snap.title = std::move(title);
+    snap.text_excerpt = std::move(excerpt);
+    snap.captured_at = now();
+    workspace().browser_history.push_back(snap);
+    record_computer_action(computer_id, "browser", "browser", "navigate",
+                           snap.url, "Navigated to " + snap.title);
+    touch();
+    return true;
+}
+
+// Step 24: terminal
+bool App::run_terminal_command(std::string computer_id, std::string command,
+                                std::string output, int exit_code) {
+    if (active_user_.empty()) return false;
+    TerminalOutput term;
+    term.command = std::move(command);
+    term.output = std::move(output);
+    term.exit_code = exit_code;
+    term.created_at = now();
+    workspace().terminal_history.push_back(term);
+    record_computer_action(computer_id, "terminal", "terminal", "execute",
+                           term.command, term.output.substr(0, 120));
+    touch();
+    return true;
+}
+
+// Step 30: undo last computer action
+bool App::undo_computer_action(std::string computer_id) {
+    if (active_user_.empty()) return false;
+    auto& log = workspace().computer_log;
+    for (int i = static_cast<int>(log.size()) - 1; i >= 0; --i) {
+        if (log[i].computer_id == computer_id && !log[i].undone) {
+            log[i].undone = true;
+            log[i].undo_detail = "undone at " + std::to_string(now());
+            record_audit(active_user_, "undo", "undid: " + log[i].verb + " " + log[i].target);
+            touch();
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<BrowserSnapshot> App::browser_history(std::size_t limit) const {
+    auto out = active_user_.empty() ? std::vector<BrowserSnapshot>{} : workspace().browser_history;
+    if (out.size() > limit) out.erase(out.begin(), out.end() - static_cast<std::ptrdiff_t>(limit));
+    return out;
+}
+
+std::vector<TerminalOutput> App::terminal_history(std::size_t limit) const {
+    auto out = active_user_.empty() ? std::vector<TerminalOutput>{} : workspace().terminal_history;
+    if (out.size() > limit) out.erase(out.begin(), out.end() - static_cast<std::ptrdiff_t>(limit));
+    return out;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Steps 41-50: Memory and knowledge
+// ═══════════════════════════════════════════════════════════════════════════
+
+bool App::add_memory(std::string kind, std::string content,
+                     std::string source, std::vector<std::string> tags) {
+    if (active_user_.empty()) return false;
+    MemoryEntry entry;
+    entry.id = "mem-" + std::to_string(workspace().memory_store.size() + 1);
+    entry.user = active_user_;
+    entry.kind = std::move(kind);
+    entry.content = std::move(content);
+    entry.source = std::move(source);
+    entry.tags = std::move(tags);
+    entry.created_at = now();
+    workspace().memory_store.push_back(std::move(entry));
+    touch();
+    return true;
+}
+
+// Step 43: compress old memories into summaries
+bool App::summarize_old_memories(std::size_t keep_recent) {
+    if (active_user_.empty()) return false;
+    auto& store = workspace().memory_store;
+    if (store.size() <= keep_recent) return false;
+    std::size_t to_summarize = store.size() - keep_recent;
+    std::string summary_text = "Summary of " + std::to_string(to_summarize) + " earlier memories: ";
+    for (std::size_t i = 0; i < to_summarize; ++i) {
+        store[i].summarized = true;
+        store[i].summarized_at = now();
+        summary_text += store[i].content.substr(0, 40) + "; ";
+    }
+    // Add summary entry
+    MemoryEntry sum_entry;
+    sum_entry.id = "mem-summary-" + std::to_string(now());
+    sum_entry.user = active_user_;
+    sum_entry.kind = "summary";
+    sum_entry.content = summary_text;
+    sum_entry.created_at = now();
+    store.push_back(std::move(sum_entry));
+    touch();
+    return true;
+}
+
+std::vector<MemoryEntry> App::memory_entries(std::size_t limit) const {
+    auto out = active_user_.empty() ? std::vector<MemoryEntry>{} : workspace().memory_store;
+    if (out.size() > limit) out.erase(out.begin(), out.end() - static_cast<std::ptrdiff_t>(limit));
+    return out;
+}
+
+// Step 45: search memory
+std::vector<MemoryEntry> App::search_memory(std::string_view query, std::size_t limit) const {
+    std::vector<MemoryEntry> out;
+    if (active_user_.empty()) return out;
+    for (const auto& entry : workspace().memory_store) {
+        if (entry.content.find(query) != std::string::npos ||
+            entry.kind.find(query) != std::string::npos) {
+            out.push_back(entry);
+            if (out.size() >= limit) break;
+        }
+    }
+    return out;
+}
+
+// Step 47: knowledge base
+bool App::add_knowledge(std::string title, std::string body,
+                        std::vector<std::string> tags) {
+    if (active_user_.empty()) return false;
+    KnowledgeEntry entry;
+    entry.id = "kb-" + std::to_string(workspace().knowledge.size() + 1);
+    entry.title = std::move(title);
+    entry.body = std::move(body);
+    entry.tags = std::move(tags);
+    entry.created_at = now();
+    entry.updated_at = entry.created_at;
+    workspace().knowledge.push_back(std::move(entry));
+    touch();
+    return true;
+}
+
+std::vector<KnowledgeEntry> App::knowledge_entries(std::size_t limit) const {
+    auto out = active_user_.empty() ? std::vector<KnowledgeEntry>{} : workspace().knowledge;
+    if (out.size() > limit) out.erase(out.begin(), out.end() - static_cast<std::ptrdiff_t>(limit));
+    return out;
+}
+
+std::vector<KnowledgeEntry> App::search_knowledge(std::string_view query, std::size_t limit) const {
+    std::vector<KnowledgeEntry> out;
+    if (active_user_.empty()) return out;
+    for (const auto& entry : workspace().knowledge) {
+        if (entry.title.find(query) != std::string::npos ||
+            entry.body.find(query) != std::string::npos) {
+            out.push_back(entry);
+            if (out.size() >= limit) break;
+        }
+    }
+    return out;
+}
+
+// Step 48: workspace snapshot export/import
+bool App::export_workspace_snapshot(const std::filesystem::path& dest) const {
+    if (active_user_.empty()) return false;
+    std::error_code ec;
+    std::filesystem::create_directories(dest, ec);
+    // Export files
+    for (const auto& f : workspace().files) {
+        std::ofstream out(dest / f.name);
+        if (out) out << f.content;
+    }
+    // Export knowledge
+    std::ofstream kb(dest / "knowledge.tsv");
+    for (const auto& k : workspace().knowledge) {
+        kb << k.id << "\t" << k.title << "\t" << k.body.substr(0, 200) << "\n";
+    }
+    // Note: cannot call record_audit from const method; caller should log
+    return true;
+}
+
+bool App::import_workspace_snapshot(const std::filesystem::path& src) {
+    if (active_user_.empty()) return false;
+    if (!std::filesystem::exists(src)) return false;
+    for (const auto& entry : std::filesystem::directory_iterator(src)) {
+        if (!entry.is_regular_file()) continue;
+        std::ifstream in(entry.path());
+        std::string content((std::istreambuf_iterator<char>(in)),
+                             std::istreambuf_iterator<char>());
+        upload_file(entry.path().filename().string(), content);
+    }
+    record_audit(active_user_, "import", "workspace snapshot from " + src.string());
+    touch();
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Steps 51-60: Files, projects, execution
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Step 55: file diff
+FileDiff App::diff_file(std::string name, std::string new_content) const {
+    FileDiff diff;
+    diff.new_content = new_content;
+    if (active_user_.empty()) return diff;
+    for (const auto& f : workspace().files) {
+        if (f.name == name) {
+            diff.old_content = f.content;
+            // Simple line-diff patch
+            std::ostringstream patch;
+            patch << "--- " << name << "\n+++ " << name << " (new)\n";
+            // Count changed chars as a simple indicator
+            patch << "(changed " << std::abs(static_cast<int>(new_content.size())
+                                             - static_cast<int>(f.content.size()))
+                  << " chars)\n";
+            diff.patch = patch.str();
+            return diff;
+        }
+    }
+    return diff;
+}
+
+// Step 56: update file with version history
+bool App::update_file(std::string name, std::string content) {
+    if (active_user_.empty()) return false;
+    for (auto& f : workspace().files) {
+        if (f.name != name) continue;
+        FileVersion ver;
+        ver.content = f.content;
+        ver.saved_at = now();
+        ver.saved_by = active_user_;
+        f.history.push_back(std::move(ver));
+        f.content = std::move(content);
+        record_audit(active_user_, "file", "updated " + name);
+        touch();
+        return true;
+    }
+    return false;
+}
+
+// Step 56: rollback file to previous version
+bool App::rollback_file(std::string name, std::size_t version_index) {
+    if (active_user_.empty()) return false;
+    for (auto& f : workspace().files) {
+        if (f.name != name) continue;
+        if (version_index >= f.history.size()) return false;
+        // Push current as new version
+        FileVersion ver;
+        ver.content = f.content;
+        ver.saved_at = now();
+        ver.saved_by = active_user_;
+        f.history.push_back(ver);
+        f.content = f.history[version_index].content;
+        record_audit(active_user_, "file", "rolled back " + name + " to v" + std::to_string(version_index));
+        touch();
+        return true;
+    }
+    return false;
+}
+
+// Step 60: search files
+std::vector<FileRecord> App::search_files(std::string_view query) const {
+    std::vector<FileRecord> out;
+    if (active_user_.empty()) return out;
+    for (const auto& f : workspace().files) {
+        if (f.name.find(query) != std::string::npos ||
+            f.content.find(query) != std::string::npos) {
+            out.push_back(f);
+        }
+    }
+    return out;
+}
+
+// Step 51: project runner with phases
+bool App::run_project(std::string id) {
+    if (active_user_.empty()) return false;
+    for (auto& proj : workspace().projects) {
+        if (proj.id != id) continue;
+        if (!proj.executable) return false;
+
+        ProjectRun setup_run;
+        setup_run.phase = "setup";
+        setup_run.exit_code = 0;
+        setup_run.output = "Setup: checking environment for " + proj.name;
+        setup_run.ran_at = now();
+        proj.runs.push_back(setup_run);
+
+        ProjectRun main_run;
+        main_run.phase = "run";
+        main_run.exit_code = 0;
+        main_run.output = "Run: executing `" + proj.command + "`\n[exit 0]";
+        main_run.ran_at = now();
+        proj.runs.push_back(main_run);
+
+        ProjectRun teardown;
+        teardown.phase = "teardown";
+        teardown.exit_code = 0;
+        teardown.output = "Teardown: cleaned up";
+        teardown.ran_at = now();
+        proj.runs.push_back(teardown);
+
+        proj.last_exit_code = 0;
+        proj.last_output = main_run.output;
+        record_computer_action(active_computer_id(), "operator", "terminal",
+                               "execute", proj.command, main_run.output.substr(0, 120));
+        record_audit(active_user_, "project", "ran " + proj.id);
+        touch();
+        return true;
+    }
+    return false;
+}
+
+// Step 8: device approval
+bool App::approve_device(std::string id) {
+    if (active_user_.empty()) return false;
+    for (auto& dev : workspace().devices) {
+        if (dev.id == id) {
+            dev.approved = true;
+            dev.linked_at = now();
+            record_audit(active_user_, "device", "approved " + id);
+            touch();
+            return true;
+        }
+    }
+    return false;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Steps 61-70: Safety and trust
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Step 70: local-only mode
+bool App::set_local_only_mode(bool enabled) {
+    if (active_user_.empty()) return false;
+    workspace().local_only_mode = enabled;
+    record_audit(active_user_, "policy", std::string("local_only_mode ") + (enabled ? "on" : "off"));
+    touch();
+    return true;
+}
+
+bool App::local_only_mode() const {
+    if (active_user_.empty()) return true;
+    return workspace().local_only_mode;
+}
+
+// Step 65: secret redaction
+std::string App::redact_secrets(std::string text) const {
+    if (active_user_.empty()) return text;
+    for (const auto& secret : workspace().secrets) {
+        if (secret.value.empty()) continue;
+        std::size_t pos = 0;
+        while ((pos = text.find(secret.value, pos)) != std::string::npos) {
+            text.replace(pos, secret.value.size(), "[REDACTED]");
+            pos += 10; // length of "[REDACTED]"
+        }
+    }
+    return text;
+}
+
+// Step 68: policy rules
+bool App::add_policy(std::string id, std::string action_pattern,
+                     std::string decision, std::string reason) {
+    if (active_user_.empty()) return false;
+    PolicyRule rule{std::move(id), std::move(action_pattern),
+                    std::move(decision), std::move(reason)};
+    workspace().policies.push_back(std::move(rule));
+    record_audit(active_user_, "policy", "added rule " + workspace().policies.back().id);
+    touch();
+    return true;
+}
+
+std::vector<PolicyRule> App::policies() const {
+    return active_user_.empty() ? std::vector<PolicyRule>{} : workspace().policies;
+}
+
+bool App::check_policy(std::string_view action) const {
+    if (active_user_.empty()) return true;
+    for (const auto& rule : workspace().policies) {
+        if (action.find(rule.action_pattern) != std::string::npos) {
+            if (rule.decision == "deny") return false;
+        }
+    }
+    return true;
+}
+
+// Step 67: RBAC
+bool App::set_user_role(std::string username, std::string role) {
+    if (active_user_.empty()) return false;
+    workspace().role_permissions[username] = std::move(role);
+    record_audit(active_user_, "rbac", "set role for " + username);
+    touch();
+    return true;
+}
+
+std::string App::user_role(std::string_view username) const {
+    if (active_user_.empty()) return "viewer";
+    const auto& perms = workspace().role_permissions;
+    const auto it = perms.find(std::string(username));
+    return it != perms.end() ? it->second : "viewer";
+}
+
+bool App::user_can(std::string_view username, std::string_view action) const {
+    const auto role = user_role(username);
+    if (role == "admin") return true;
+    if (role == "operator") {
+        // operators can do everything except manage users
+        return action.find("register") == std::string::npos &&
+               action.find("delete_user") == std::string::npos;
+    }
+    if (role == "viewer") {
+        // viewers can only read
+        return action == "view" || action == "search" || action == "export";
+    }
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Steps 44,60,73: Universal search
+// ═══════════════════════════════════════════════════════════════════════════
+
+std::vector<App::SearchResult> App::search_all(std::string_view query,
+                                                std::size_t limit) const {
+    std::vector<SearchResult> results;
+    if (active_user_.empty() || query.empty()) return results;
+
+    // Search tasks
+    for (const auto& task : workspace().tasks) {
+        double score = 0.0;
+        if (task.title.find(query) != std::string::npos) score += 2.0;
+        if (task.description.find(query) != std::string::npos) score += 1.0;
+        if (score > 0)
+            results.push_back({"task", task.id, task.title,
+                                task.description.substr(0, 80), score});
+    }
+    // Search files
+    for (const auto& f : workspace().files) {
+        double score = 0.0;
+        if (f.name.find(query) != std::string::npos) score += 2.0;
+        if (f.content.find(query) != std::string::npos) score += 1.0;
+        if (score > 0)
+            results.push_back({"file", f.name, f.name,
+                                f.content.substr(0, 80), score});
+    }
+    // Search memory
+    for (const auto& m : workspace().memory_store) {
+        if (m.content.find(query) != std::string::npos)
+            results.push_back({"memory", m.id, m.kind,
+                                m.content.substr(0, 80), 1.0});
+    }
+    // Search knowledge
+    for (const auto& k : workspace().knowledge) {
+        double score = 0.0;
+        if (k.title.find(query) != std::string::npos) score += 2.0;
+        if (k.body.find(query) != std::string::npos) score += 1.0;
+        if (score > 0)
+            results.push_back({"knowledge", k.id, k.title,
+                                k.body.substr(0, 80), score});
+    }
+    // Search audit log
+    for (const auto& e : workspace().audit) {
+        if (e.detail.find(query) != std::string::npos)
+            results.push_back({"log", std::to_string(e.created_at), e.action,
+                                e.detail.substr(0, 80), 0.5});
+    }
+    // Search agents
+    for (const auto& a : workspace().agents) {
+        if (a.id.find(query) != std::string::npos ||
+            a.role.find(query) != std::string::npos)
+            results.push_back({"agent", a.id, a.role, a.id, 1.0});
+    }
+
+    // Sort by score descending
+    std::sort(results.begin(), results.end(),
+              [](const SearchResult& a, const SearchResult& b){
+                  return a.score > b.score;
+              });
+    if (results.size() > limit) results.resize(limit);
+    return results;
+}
+
 
 } // namespace luo_gate

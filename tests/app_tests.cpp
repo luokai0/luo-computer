@@ -5,91 +5,449 @@
 #include <cassert>
 #include <filesystem>
 #include <iostream>
+#include <chrono>
 
+using namespace luo_gate;
+namespace fs = std::filesystem;
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+static void section(const char* name) {
+    std::cout << "\n[TEST] " << name << "\n";
+}
+static int passed = 0, failed = 0;
+#define CHECK(expr) do { \
+    if (!(expr)) { \
+        std::cerr << "  FAIL " << #expr << "  (" << __FILE__ << ":" << __LINE__ << ")\n"; \
+        ++failed; \
+    } else { ++passed; } \
+} while(0)
+
+// ─────────────────────────────────────────────────────────────────────────────
 int main() {
-    using namespace luo_gate;
+    const auto t0 = std::chrono::steady_clock::now();
 
-    assert(is_valid_username("Luo"));
-    assert(!is_valid_username("Kai77"));
-    assert(!is_valid_username("ab"));
-    assert(is_valid_password("Gate"));
+    // ── Step 91: Security ────────────────────────────────────────────────────
+    section("Security");
+    CHECK(is_valid_username("Luo"));
+    CHECK(is_valid_username("Alice"));
+    CHECK(!is_valid_username("Kai77"));
+    CHECK(!is_valid_username("ab"));
+    CHECK(!is_valid_username(""));
+    CHECK(is_valid_password("Gate"));
+    CHECK(is_valid_password("SuperSecret"));
+    CHECK(!is_valid_password(""));
 
+    // ── Step 91: App baseline ────────────────────────────────────────────────
+    section("App baseline");
     App app;
-    assert(app.register_user("Luo", "Gate"));
-    assert(app.login("Luo", "Gate"));
+    CHECK(app.register_user("Luo", "Gate"));
+    CHECK(!app.register_user("Luo", "Gate")); // duplicate rejected
+    CHECK(app.login("Luo", "Gate"));
+    CHECK(app.authenticated());
+    CHECK(app.current_user() == "Luo");
+    CHECK(app.agent_count() == 10000);
+    CHECK(app.computers().size() == 1);
+    CHECK(app.tasks().empty());
+    CHECK(app.luo_index_entries().empty());
 
-    assert(app.agent_count() == 10000);
-    assert(app.computers().size() == 1);
-    assert(app.tasks().empty());
-    assert(app.luo_index_entries().empty());
+    // ── Step 62: Consent / local-only mode ───────────────────────────────────
+    section("Consent & local-only mode");
+    CHECK(app.local_only_mode()); // default: on
+    CHECK(app.set_local_only_mode(false));
+    CHECK(!app.local_only_mode());
+    CHECK(app.set_local_only_mode(true));
+    CHECK(app.local_only_mode());
 
-    assert(app.attach_computer("desktop", "Desktop", "linux", {"computer", "browser", "terminal"}, true));
-    assert(app.set_active_computer("desktop"));
-    assert(app.create_task("Build swarm", "Break work into roles", "build"));
-    assert(app.tick());
+    // ── Step 21: Computers ───────────────────────────────────────────────────
+    section("Computers");
+    CHECK(app.attach_computer("desktop", "Desktop", "linux",
+                              {"computer", "browser", "terminal"}, true));
+    CHECK(app.set_active_computer("desktop"));
+    CHECK(app.active_computer_id() == "desktop");
+    CHECK(app.computers().size() >= 1);
 
-    const auto repo_root = std::filesystem::current_path().parent_path();
+    // Step 22: windows
+    CHECK(app.open_window("desktop", "Editor", "editor"));
+    CHECK(app.open_window("desktop", "Browser", "browser"));
+    {
+        const auto comps = app.computers();
+        bool found = false;
+        for (const auto& c : comps)
+            if (c.id == "desktop") { CHECK(c.windows.size() >= 2); found = true; }
+        CHECK(found);
+    }
+
+    // Step 23: browser snapshots
+    CHECK(app.navigate_browser("desktop", "https://github.com/luokai0",
+                               "luokai0 · GitHub", "Profile page"));
+    CHECK(!app.browser_history(10).empty());
+    CHECK(app.browser_history(10)[0].url == "https://github.com/luokai0");
+
+    // Step 24: terminal
+    CHECK(app.run_terminal_command("desktop", "echo hello", "hello", 0));
+    CHECK(!app.terminal_history(10).empty());
+    CHECK(app.terminal_history(10)[0].exit_code == 0);
+
+    // Step 30: undo
+    CHECK(app.undo_computer_action("desktop"));
+
+    // ── LUO OS index ─────────────────────────────────────────────────────────
+    section("LUO OS index");
+    const auto repo_root = fs::current_path().parent_path();
     const auto luo_os_root = repo_root / "luo_os";
-    assert(std::filesystem::exists(luo_os_root));
-    assert(app.import_luo_os(luo_os_root));
-    assert(!app.luo_index_entries().empty());
-    assert(!app.search_luo_os("README").empty());
+    CHECK(fs::exists(luo_os_root));
+    CHECK(app.import_luo_os(luo_os_root));
+    CHECK(!app.luo_index_entries().empty());
+    CHECK(!app.search_luo_os("README").empty());
 
-    assert(app.set_secret("search", "alpha-key"));
-    assert(app.upload_file("brief.md", "task brief"));
-    assert(app.add_skill("orchestrate", "swarm orchestration", {"agent", "task"}));
-    assert(app.add_project("demo", "Demo", "echo demo"));
-    assert(app.link_device("macbook", "MacBook", {"approved"}, true));
+    // Step 9: search
+    CHECK(!app.search_luo_os("").empty());
 
-    const auto summary = app.summary();
-    assert(summary.user_count == 1);
-    assert(summary.agent_count >= 10000);
-    assert(summary.task_count >= 1);
-    assert(summary.computer_count >= 1);
-    assert(summary.secret_count == 1);
-    assert(summary.file_count == 1);
-    assert(summary.skill_count == 1);
-    assert(summary.project_count == 1);
-    assert(summary.device_count == 1);
+    // ── Step 9,31-40: Tasks ───────────────────────────────────────────────────
+    section("Tasks");
+    CHECK(app.create_task("Build swarm", "Break work into roles", "build", 1));
+    CHECK(app.tick());
+    CHECK(app.tasks().size() >= 1);
+    CHECK(app.tasks()[0].status != "queued"); // should have progressed
 
-    const auto html = render_dashboard_html(app);
-    assert(html.find("Task inspector") != std::string::npos);
-    assert(html.find("Playback") != std::string::npos || html.find("computer actions") != std::string::npos);
-    assert(html.find("LUO OS tree") != std::string::npos);
-    assert(html.find("LUO OS index") != std::string::npos);
+    // Step 32: validate
+    CHECK(app.create_task("Research AI", "Search AI trends", "research", 3));
+    CHECK(app.validate_task(app.tasks()[1].id));
+    CHECK(app.tasks()[1].validated);
 
-    const auto state = app.export_state();
-    assert(state.find("\"users\":1") != std::string::npos);
-    assert(state.find("\"agents\":") != std::string::npos);
-    assert(state.find("\"tasks\":") != std::string::npos);
-    assert(state.find("\"computers\":") != std::string::npos);
+    // Step 36: priority
+    CHECK(app.set_task_priority(app.tasks()[0].id, 2));
+    CHECK(app.tasks()[0].priority == 2);
 
-    const auto temp_root = std::filesystem::temp_directory_path() / "luo-computer-state-test";
-    std::filesystem::remove_all(temp_root);
+    // Step 34: subtasks
+    CHECK(app.add_subtask(app.tasks()[0].id, "Set up repo", "coding", {}));
+    CHECK(app.add_subtask(app.tasks()[0].id, "Write tests", "coding", {"Set up repo"}));
+    CHECK(app.tasks()[0].subtasks.size() == 2);
+
+    // Step 10: filter
     {
-        App saved(temp_root);
-        assert(saved.register_user("Luo", "Gate"));
-        assert(saved.login("Luo", "Gate"));
-        assert(saved.tasks().empty());
-        assert(saved.computers().size() == 1);
-        assert(saved.attach_computer("desk", "Desk", "linux", {"computer", "browser"}, true));
-        assert(saved.import_luo_os(luo_os_root));
-        assert(saved.create_task("Persist", "Save and reload", "build"));
-        assert(saved.tick());
-        assert(saved.save());
+        const auto running = app.tasks_filtered("", "build", "");
+        CHECK(!running.empty());
+        const auto found = app.tasks_filtered("", "", "Build");
+        CHECK(!found.empty());
+    }
+
+    // Step 38: pause/resume/cancel
+    {
+        CHECK(app.create_task("Ops task", "Coordinate ops", "ops", 5));
+        const auto id = app.tasks().back().id;
+        CHECK(app.cancel_task(id, "not needed"));
+        const auto t = app.get_task(id);
+        CHECK(t.has_value());
+        CHECK(t->status == "cancelled");
+    }
+
+    // Step 38: retry step
+    CHECK(app.retry_task_step(app.tasks()[0].id));
+
+    // Step 10: reopen — reopen the cancelled ops task
+    {
+        const auto& all = app.tasks();
+        std::string cancelled_id;
+        for (const auto& t : all)
+            if (t.status == "cancelled") { cancelled_id = t.id; break; }
+        if (!cancelled_id.empty())
+            CHECK(app.reopen_task(cancelled_id));
+    }
+
+    // ── Step 12-20: Agents ────────────────────────────────────────────────────
+    section("Agents");
+    CHECK(app.agent_count() >= 10000);
+
+    // Step 12: skills
+    CHECK(app.update_agent_skills(app.agents(1)[0].id, {{"coding","expert","c++"}}));
+
+    // Step 13: filter
+    {
+        const auto filtered = app.filter_agents("planner", "", false, "");
+        CHECK(!filtered.empty());
+        const auto busy_only = app.filter_agents("", "", true, "");
+        // busy_only may be empty if no agents are busy — both are valid
+        (void)busy_only;
+    }
+
+    // Step 17: inbox
+    CHECK(app.send_agent_message(app.agents(1)[0].id, "instruction", "Start task A"));
+    CHECK(!app.agent_messages(app.agents(1)[0].id).empty());
+
+    // Step 18: health check (kill switch)
+    CHECK(app.kill_all_agents());
+
+    // ── Steps 41-50: Memory & Knowledge ──────────────────────────────────────
+    section("Memory & Knowledge");
+    CHECK(app.add_memory("chat", "User prefers concise answers", "user", {"preference"}));
+    CHECK(app.add_memory("task", "Completed swarm task", "task-1", {"task"}));
+    CHECK(app.memory_entries(100).size() >= 2);
+    CHECK(!app.search_memory("concise").empty());
+
+    // Step 43: summarize
+    for (int i = 0; i < 60; i++)
+        app.add_memory("fact", "fact " + std::to_string(i), "auto", {});
+    CHECK(app.summarize_old_memories(50));
+    CHECK(!app.memory_entries(200).empty());
+
+    // Step 47: knowledge base
+    CHECK(app.add_knowledge("C++ best practices", "Use RAII, smart pointers...", {"c++","dev"}));
+    CHECK(app.add_knowledge("Agent orchestration", "Assign agents by role fit", {"agents"}));
+    CHECK(app.knowledge_entries(10).size() >= 2);
+    CHECK(!app.search_knowledge("RAII").empty());
+
+    // Step 48: snapshot export
+    {
+        const auto snap_dir = fs::temp_directory_path() / "luo-snap-test";
+        fs::remove_all(snap_dir);
+        CHECK(app.upload_file("readme.md", "# LUO COMPUTER\n"));
+        CHECK(app.export_workspace_snapshot(snap_dir));
+        CHECK(fs::exists(snap_dir));
+        fs::remove_all(snap_dir);
+    }
+
+    // ── Steps 51-60: Files, Projects ─────────────────────────────────────────
+    section("Files & Projects");
+    CHECK(app.set_secret("search", "alpha-key"));
+    CHECK(app.set_secret("openai", "sk-test"));
+    CHECK(app.secrets().size() >= 2);
+
+    // Step 65: redact
+    {
+        const auto redacted = app.redact_secrets("key is alpha-key and sk-test");
+        CHECK(redacted.find("alpha-key") == std::string::npos);
+        CHECK(redacted.find("[REDACTED]") != std::string::npos);
+    }
+
+    CHECK(app.upload_file("brief.md", "task brief", "demo"));
+    CHECK(app.upload_file("notes.md", "## Notes\nLine one\nLine two", "research"));
+    CHECK(app.files().size() >= 2);
+
+    // Step 55: diff
+    {
+        const auto diff = app.diff_file("brief.md", "updated brief");
+        CHECK(!diff.old_content.empty());
+        CHECK(!diff.patch.empty());
+    }
+
+    // Step 56: update + version history
+    CHECK(app.update_file("brief.md", "updated brief v2"));
+    CHECK(app.files()[0].history.size() >= 1 || app.files()[1].history.size() >= 1);
+
+    // Step 56: rollback
+    CHECK(app.rollback_file("brief.md", 0));
+
+    // Step 60: search files
+    CHECK(!app.search_files("Notes").empty());
+
+    CHECK(app.add_skill("orchestrate", "swarm orchestration", {"agent","task"}));
+    CHECK(app.skills().size() >= 1);
+
+    // Step 57: project templates
+    CHECK(app.add_project("demo", "Demo", "echo demo", {}, true, "cli"));
+    CHECK(app.add_project("web-demo", "Web Demo", "npm start", {}, false, "web"));
+    CHECK(app.projects().size() >= 2);
+
+    // Step 51: project runner
+    CHECK(app.run_project("demo"));
+    {
+        const auto projs = app.projects();
+        bool found = false;
+        for (const auto& p : projs)
+            if (p.id == "demo") { CHECK(p.last_exit_code == 0); found = true; }
+        CHECK(found);
+    }
+
+    // Step 8: devices
+    CHECK(app.link_device("macbook", "MacBook", {"approved"}, false));
+    CHECK(app.approve_device("macbook"));
+    CHECK(app.devices()[0].approved);
+
+    // ── Steps 61-70: Safety & Trust ───────────────────────────────────────────
+    section("Safety & Trust");
+
+    // Step 62: require approval — returns false when newly queued (pending)
+    // Drain any approvals auto-queued by tick/computer actions first
+    for (const auto& pending : app.pending_approvals())
+        app.approve_action(pending);
+    app.require_approval("delete_all_files", "Wipe workspace"); // queues it
+    CHECK(!app.pending_approvals().empty());
+    CHECK(app.approve_action("delete_all_files"));
+    CHECK(app.pending_approvals().empty());
+
+    // Step 68: policy rules
+    CHECK(app.add_policy("no-delete", "delete", "deny", "Destructive"));
+    CHECK(!app.check_policy("delete_workspace"));   // blocked
+    CHECK(app.check_policy("create_task"));         // allowed
+
+    // Step 67: RBAC
+    CHECK(app.set_user_role("Luo", "admin"));
+    CHECK(app.user_role("Luo") == "admin");
+    CHECK(app.user_can("Luo", "register_user"));
+
+    CHECK(app.register_user("Bob", "Secret"));
+    CHECK(app.set_user_role("Bob", "viewer"));
+    CHECK(!app.user_can("Bob", "register_user")); // viewer blocked
+
+    // Step 64,66: audit log
+    {
+        const auto audit = app.audit_log(100);
+        CHECK(!audit.empty());
+    }
+
+    // ── Steps 44,73: Universal search ────────────────────────────────────────
+    section("Universal search");
+    {
+        const auto results = app.search_all("brief", 20);
+        CHECK(!results.empty());
+        CHECK(results[0].kind == "file" || results[0].kind == "task" ||
+              results[0].kind == "memory");
     }
     {
-        App loaded(temp_root);
-        assert(loaded.load());
-        assert(loaded.has_user("Luo"));
-        assert(loaded.login("Luo", "Gate"));
-        assert(loaded.computers().size() >= 1);
-        assert(loaded.tasks().size() >= 1);
-        assert(!loaded.luo_index_entries().empty());
-        assert(!loaded.search_luo_os("README").empty());
+        const auto results = app.search_all("swarm", 10);
+        CHECK(!results.empty());
     }
-    std::filesystem::remove_all(temp_root);
+    {
+        const auto empty = app.search_all("zzznomatch999", 10);
+        CHECK(empty.empty());
+    }
 
+    // ── Summary ───────────────────────────────────────────────────────────────
+    section("Summary");
+    {
+        const auto s = app.summary();
+        CHECK(s.user_count >= 2);
+        CHECK(s.agent_count >= 10000);
+        CHECK(s.task_count >= 2);
+        CHECK(s.computer_count >= 1);
+        CHECK(s.secret_count >= 2);
+        CHECK(s.file_count >= 2);
+        CHECK(s.skill_count >= 1);
+        CHECK(s.project_count >= 2);
+        CHECK(s.device_count >= 1);
+        CHECK(s.memory_count >= 2);
+        CHECK(s.knowledge_count >= 2);
+        CHECK(!s.session_stage.empty());
+    }
+
+    // ── Step 71-80: UI / Dashboard ────────────────────────────────────────────
+    section("Dashboard HTML");
+    {
+        const auto html = render_dashboard_html(app);
+        // Core sections
+        CHECK(html.find("LUO COMPUTER") != std::string::npos);
+        CHECK(html.find("LUO OS tree") != std::string::npos);
+        CHECK(html.find("LUO OS index") != std::string::npos);
+        CHECK(html.find("Playback") != std::string::npos);
+        CHECK(html.find("Agent roster") != std::string::npos);
+        CHECK(html.find("Task history") != std::string::npos);
+        CHECK(html.find("Memory store") != std::string::npos);
+        CHECK(html.find("Knowledge base") != std::string::npos);
+        CHECK(html.find("Audit log") != std::string::npos);
+        CHECK(html.find("File browser") != std::string::npos);
+        CHECK(html.find("Project runner") != std::string::npos);
+        CHECK(html.find("Browser history") != std::string::npos);
+        CHECK(html.find("Terminal") != std::string::npos);
+        CHECK(html.find("Privacy") != std::string::npos);
+        CHECK(html.find("Devices") != std::string::npos);
+        // Step 77: command palette
+        CHECK(html.find("palette") != std::string::npos);
+        // Step 80: accessibility
+        CHECK(html.find("role=") != std::string::npos || html.find("role='") != std::string::npos);
+        CHECK(html.find("aria-") != std::string::npos);
+        // Step 78: design system
+        CHECK(html.find("--accent") != std::string::npos);
+        CHECK(html.find("tab-panel") != std::string::npos);
+    }
+
+    // ── Export state ──────────────────────────────────────────────────────────
+    section("Export state");
+    {
+        const auto state = app.export_state();
+        CHECK(state.find("\"users\":") != std::string::npos);
+        CHECK(state.find("\"agents\":") != std::string::npos);
+        CHECK(state.find("\"tasks\":") != std::string::npos);
+        CHECK(state.find("\"computers\":") != std::string::npos);
+        CHECK(state.find("\"memory\":") != std::string::npos);
+        CHECK(state.find("\"knowledge\":") != std::string::npos);
+    }
+
+    // ── Step 92: Persistence round-trip ──────────────────────────────────────
+    section("Persistence round-trip");
+    {
+        const auto temp_root = fs::temp_directory_path() / "luo-computer-state-test";
+        fs::remove_all(temp_root);
+        {
+            App saved(temp_root);
+            CHECK(saved.register_user("Luo", "Gate"));
+            CHECK(saved.login("Luo", "Gate"));
+            CHECK(saved.attach_computer("desk", "Desk", "linux", {"computer","browser"}, true));
+            CHECK(saved.import_luo_os(luo_os_root));
+            CHECK(saved.create_task("Persist", "Save and reload", "build", 2));
+            CHECK(saved.add_memory("fact", "persisted fact", "test", {}));
+            CHECK(saved.add_knowledge("Persistence", "Data survives restarts", {}));
+            CHECK(saved.tick());
+            CHECK(saved.set_secret("api", "secret-val"));
+            CHECK(saved.upload_file("persist.md", "persisted content"));
+            CHECK(saved.add_project("saved-proj", "Saved Project", "echo saved", {}, true, "cli"));
+            CHECK(saved.save());
+        }
+        {
+            App loaded(temp_root);
+            CHECK(loaded.load());
+            CHECK(loaded.has_user("Luo"));
+            CHECK(loaded.login("Luo", "Gate"));
+            CHECK(loaded.computers().size() >= 1);
+            CHECK(loaded.tasks().size() >= 1);
+            CHECK(!loaded.luo_index_entries().empty());
+            CHECK(!loaded.search_luo_os("README").empty());
+            CHECK(loaded.secrets().size() >= 1);
+            CHECK(loaded.files().size() >= 1);
+            CHECK(loaded.projects().size() >= 1);
+        }
+        fs::remove_all(temp_root);
+    }
+
+    // ── Step 98: Performance baseline ────────────────────────────────────────
+    section("Performance");
+    {
+        const auto perf_start = std::chrono::steady_clock::now();
+        // Bulk task creation
+        for (int i = 0; i < 100; i++)
+            app.create_task("Perf task " + std::to_string(i), "desc", "build", 5);
+        // Search across all
+        for (int i = 0; i < 50; i++)
+            app.search_all("task", 20);
+        // Memory operations
+        for (int i = 0; i < 200; i++)
+            app.add_memory("fact", "perf fact " + std::to_string(i), "perf", {});
+        const auto perf_end = std::chrono::steady_clock::now();
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            perf_end - perf_start).count();
+        std::cout << "  perf: 100 tasks + 50 searches + 200 memories in " << ms << "ms\n";
+        CHECK(ms < 30000); // must complete in under 30 seconds (debug build)
+    }
+
+    // ── Step 100: Final check ─────────────────────────────────────────────────
+    section("Logout");
+    app.logout();
+    CHECK(!app.authenticated());
+    CHECK(app.current_user().empty());
+
+    // ── Report ────────────────────────────────────────────────────────────────
+    const auto t1 = std::chrono::steady_clock::now();
+    const auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+    std::cout << "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+    std::cout << "  PASSED: " << passed << "\n";
+    std::cout << "  FAILED: " << failed << "\n";
+    std::cout << "  TOTAL:  " << total_ms << "ms\n";
+    std::cout << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+
+    if (failed > 0) {
+        std::cerr << "\nluo-computer tests FAILED (" << failed << " failures)\n";
+        return 1;
+    }
     std::cout << "luo-computer tests passed\n";
     return 0;
 }
