@@ -722,6 +722,7 @@ std::vector<std::string> App::assign_agents(Workspace& ws, const std::vector<std
         best->busy = true;
         best->task_id = task_id;
         best->last_active = now();
+        best->load++;
         assigned.push_back(best->id);
     }
     return assigned;
@@ -729,16 +730,47 @@ std::vector<std::string> App::assign_agents(Workspace& ws, const std::vector<std
 
 AgentProfile* App::find_best_agent(Workspace& ws, std::string_view role) {
     AgentProfile* best = nullptr;
-    double best_score = -std::numeric_limits<double>::infinity();
+    double best_score = -1.0;
+
     for (auto& agent : ws.agents) {
         if (agent.busy) continue;
-        double score = agent.reliability;
-        if (agent.availability == "always") score += 0.05;
-        if (agent.role.find(role) != std::string::npos) score += 0.5;
-        score -= static_cast<double>(agent.capacity) / 1000.0;
-        if (!best || score > best_score) {
-            best = &agent;
+        if (agent.availability == "offline") continue;
+        if (agent.health == "stuck") continue;
+
+        double score = agent.reliability;                          // base: 0.5-1.0
+
+        // Role match
+        if (agent.role == role)         score += 1.0;
+        else if (agent.role.find(role) != std::string::npos) score += 0.5;
+
+        // Skill match: expert > intermediate > beginner
+        for (const auto& skill : agent.skills) {
+            if (skill.name.find(role) != std::string::npos ||
+                skill.domain.find(role) != std::string::npos) {
+                if (skill.level == "expert")       score += 0.4;
+                else if (skill.level == "intermediate") score += 0.2;
+                else                               score += 0.1;
+            }
+        }
+
+        // Availability bonus
+        if (agent.availability == "always") score += 0.1;
+
+        // Load penalty: prefer less-loaded agents
+        score -= static_cast<double>(agent.load) * 0.15;
+
+        // Capacity fit (lower capacity = more specialised = slightly preferred)
+        score += (100 - agent.capacity) / 2000.0;
+
+        // Freshness: recently active agents preferred
+        if (agent.last_active > 0) {
+            const auto age = now() - agent.last_active;
+            if (age < 60) score += 0.05;
+        }
+
+        if (score > best_score) {
             best_score = score;
+            best = &agent;
         }
     }
     return best;
@@ -750,6 +782,7 @@ void App::release_agents(Workspace& ws, const TaskRecord& task) {
             agent.last_active = now();
             agent.busy = false;
             agent.task_id.clear();
+            if (agent.load > 0) agent.load--;
         }
     }
 }
@@ -760,11 +793,43 @@ void App::remember_step(TaskRecord& task, TaskStep step) {
 }
 
 void App::check_agent_health(Workspace& ws) {
-    const Timestamp cutoff = now() - 30;
+    const Timestamp t = now();
+    const Timestamp degraded_cutoff = t - 30;   // 30s without progress → degraded
+    const Timestamp stuck_cutoff    = t - 120;  // 2min → stuck
+
     for (auto& agent : ws.agents) {
-        if (agent.busy && agent.last_active && agent.last_active < cutoff) {
-            agent.reliability = std::max(0.5, agent.reliability - 0.02);
-            record_trace("health", "monitor", "degrade", agent.id + " reliability " + std::to_string(agent.reliability));
+        if (!agent.busy) {
+            // Idle agents recover reliability slowly
+            agent.health = "ok";
+            agent.stuck_since = 0;
+            if (agent.reliability < 0.9)
+                agent.reliability = std::min(0.9, agent.reliability + 0.005);
+            continue;
+        }
+
+        const bool long_idle = agent.last_active && agent.last_active < degraded_cutoff;
+        const bool very_long = agent.last_active && agent.last_active < stuck_cutoff;
+
+        if (very_long) {
+            if (agent.stuck_since == 0) agent.stuck_since = t;
+            agent.health = "stuck";
+            agent.reliability = std::max(0.3, agent.reliability - 0.05);
+            record_trace("health", "monitor", "stuck",
+                         agent.id + " stuck for " + std::to_string(t - agent.last_active) + "s");
+            // Auto-release stuck agents
+            agent.busy = false;
+            agent.task_id.clear();
+            agent.load = 0;
+            agent.health = "ok";
+            agent.stuck_since = 0;
+            record_trace("health", "monitor", "released", agent.id + " auto-released from stuck");
+        } else if (long_idle) {
+            agent.health = "degraded";
+            agent.reliability = std::max(0.5, agent.reliability - 0.01);
+            record_trace("health", "monitor", "degraded",
+                         agent.id + " reliability=" + std::to_string(agent.reliability));
+        } else {
+            agent.health = "ok";
         }
     }
 }
@@ -818,6 +883,7 @@ void App::record_audit(std::string actor, std::string action, std::string detail
 }
 
 void App::touch() {
+    search_index_dirty_ = true;
     if (auto_save_) save();
 }
 
@@ -1849,65 +1915,89 @@ bool App::user_can(std::string_view username, std::string_view action) const {
 // Steps 44,60,73: Universal search
 // ═══════════════════════════════════════════════════════════════════════════
 
+void App::rebuild_search_index() {
+    if (active_user_.empty()) return;
+    search_index_.clear();
+    const auto& ws = workspace();
+
+    for (const auto& task : ws.tasks)
+        search_index_.add({"task", task.id, task.title,
+                           "task " + task.title + " " + task.description + " " + task.kind + " " + task.status});
+    for (const auto& f : ws.files)
+        search_index_.add({"file", f.name, f.name,
+                           "file " + f.name + " " + f.content.substr(0, 1000) + " " + f.project_scope});
+    for (const auto& m : ws.memory_store)
+        search_index_.add({"memory", m.id, m.kind,
+                           "memory " + m.kind + " " + m.content + " " + m.source});
+    for (const auto& k : ws.knowledge)
+        search_index_.add({"knowledge", k.id, k.title,
+                           "knowledge " + k.title + " " + k.body});
+    // Cap agents indexed — 500 representative entries is enough for search
+    std::size_t agent_idx = 0;
+    for (const auto& a : ws.agents) {
+        if (agent_idx++ >= 500) break;
+        search_index_.add({"agent", a.id, a.role,
+                           "agent " + a.id + " " + a.role});
+    }
+    for (const auto& e : ws.audit)
+        search_index_.add({"log", std::to_string(e.created_at), e.action,
+                           "log " + e.actor + " " + e.action + " " + e.detail});
+    for (const auto& p : ws.projects)
+        search_index_.add({"project", p.id, p.name,
+                           "project " + p.id + " " + p.name + " " + p.command + " " + p.template_kind});
+
+    search_index_dirty_ = false;
+}
+
 std::vector<App::SearchResult> App::search_all(std::string_view query,
                                                 std::size_t limit) const {
+    if (active_user_.empty() || query.empty()) return {};
+
+    if (search_index_dirty_) const_cast<App*>(this)->rebuild_search_index();
+
+    const auto hits = search_index_.search(query, limit);
     std::vector<SearchResult> results;
-    if (active_user_.empty() || query.empty()) return results;
-
-    // Search tasks
-    for (const auto& task : workspace().tasks) {
-        double score = 0.0;
-        if (task.title.find(query) != std::string::npos) score += 2.0;
-        if (task.description.find(query) != std::string::npos) score += 1.0;
-        if (score > 0)
-            results.push_back({"task", task.id, task.title,
-                                task.description.substr(0, 80), score});
-    }
-    // Search files
-    for (const auto& f : workspace().files) {
-        double score = 0.0;
-        if (f.name.find(query) != std::string::npos) score += 2.0;
-        if (f.content.find(query) != std::string::npos) score += 1.0;
-        if (score > 0)
-            results.push_back({"file", f.name, f.name,
-                                f.content.substr(0, 80), score});
-    }
-    // Search memory
-    for (const auto& m : workspace().memory_store) {
-        if (m.content.find(query) != std::string::npos)
-            results.push_back({"memory", m.id, m.kind,
-                                m.content.substr(0, 80), 1.0});
-    }
-    // Search knowledge
-    for (const auto& k : workspace().knowledge) {
-        double score = 0.0;
-        if (k.title.find(query) != std::string::npos) score += 2.0;
-        if (k.body.find(query) != std::string::npos) score += 1.0;
-        if (score > 0)
-            results.push_back({"knowledge", k.id, k.title,
-                                k.body.substr(0, 80), score});
-    }
-    // Search audit log
-    for (const auto& e : workspace().audit) {
-        if (e.detail.find(query) != std::string::npos)
-            results.push_back({"log", std::to_string(e.created_at), e.action,
-                                e.detail.substr(0, 80), 0.5});
-    }
-    // Search agents
-    for (const auto& a : workspace().agents) {
-        if (a.id.find(query) != std::string::npos ||
-            a.role.find(query) != std::string::npos)
-            results.push_back({"agent", a.id, a.role, a.id, 1.0});
-    }
-
-    // Sort by score descending
-    std::sort(results.begin(), results.end(),
-              [](const SearchResult& a, const SearchResult& b){
-                  return a.score > b.score;
-              });
-    if (results.size() > limit) results.resize(limit);
+    results.reserve(hits.size());
+    for (const auto& h : hits)
+        results.push_back({h.kind, h.id, h.title, h.excerpt,
+                           static_cast<double>(h.hits)});
     return results;
 }
 
+
+} // namespace luo_gate
+
+namespace luo_gate {
+
+// ═══════════════════════════════════════════════════════════════════════════
+// P2: Background tick engine
+// ═══════════════════════════════════════════════════════════════════════════
+
+void App::start_tick_engine(int interval_ms) {
+    if (tick_running_.exchange(true)) return; // already running
+    tick_thread_ = std::thread([this, interval_ms]() {
+        // Disable auto-save inside background thread to prevent concurrent I/O
+        const bool saved_auto_save = auto_save_;
+        auto_save_ = false;
+        while (tick_running_.load(std::memory_order_relaxed)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(interval_ms));
+            if (!tick_running_.load(std::memory_order_relaxed)) break;
+            if (!active_user_.empty()) {
+                tick();
+                check_agent_health(workspace());
+            }
+        }
+        auto_save_ = saved_auto_save;
+    });
+}
+
+void App::stop_tick_engine() {
+    tick_running_.store(false, std::memory_order_relaxed);
+    if (tick_thread_.joinable()) tick_thread_.join();
+}
+
+bool App::tick_engine_running() const {
+    return tick_running_.load();
+}
 
 } // namespace luo_gate

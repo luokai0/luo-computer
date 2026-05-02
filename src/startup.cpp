@@ -78,23 +78,20 @@ bool StartupFlow::ensure_session() {
         out_ << "Starting a fresh session.\n";
         return app_.start_session("LUO COMPUTER session", "Auto-started by launch flow");
     }
-
-    if (state.resumed) {
-        out_ << "Resuming session '" << state.title << "'.\n";
-        return true;
-    }
-
-    const auto choice = confirm("Resume last session '" + state.title + "'?", true);
-    if (choice) {
+    if (state.stage == SessionStage::Running || state.stage == SessionStage::Resumed) {
+        out_ << "Resuming active session '" << state.title << "'.\n";
         return app_.resume_session();
     }
-
+    if (state.stage == SessionStage::Paused) {
+        const auto choice = confirm("Resume paused session '" + state.title + "'?", true);
+        if (choice) return app_.resume_session();
+    }
     return app_.start_session("LUO COMPUTER session", "Auto-started by launch flow");
 }
 
-bool StartupFlow::prepare_workspace(const std::filesystem::path& exe_path) {
-    if (!app_.import_luo_os(exe_path)) {
-        out_ << "Failed to import LUO OS.\n";
+bool StartupFlow::prepare_workspace(const std::filesystem::path& luo_os_root) {
+    if (!app_.import_luo_os(luo_os_root)) {
+        out_ << "Failed to import LUO OS from " << luo_os_root << "\n";
         return false;
     }
 
@@ -210,7 +207,8 @@ bool StartupFlow::task_creation_flow() {
         return false;
     }
     app_.add_trace("task", "planner", "templated", std::string(title) + ": " + category);
-    out_ << "Created templated task: " << title << "\n";
+    app_.tick();
+    out_ << "Created and started templated task: " << title << "\n";
     return true;
 }
 

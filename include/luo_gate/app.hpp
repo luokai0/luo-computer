@@ -1,7 +1,9 @@
 #pragma once
 
 #include "luo_gate/luo_index.hpp"
+#include "luo_gate/search_index.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <map>
@@ -9,6 +11,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace luo_gate {
@@ -343,6 +346,7 @@ struct SessionState {
 class App {
 public:
     explicit App(std::filesystem::path data_root = {});
+    ~App() { stop_tick_engine(); }
 
     bool load();
     bool save() const;
@@ -511,10 +515,16 @@ public:
     std::string user_role(std::string_view username) const;
     bool user_can(std::string_view username, std::string_view action) const;
 
+    // Background tick engine (P2)
+    void start_tick_engine(int interval_ms = 2000);
+    void stop_tick_engine();
+    bool tick_engine_running() const;
+
     // Summary & state export
     Summary summary() const;
     std::string export_state() const;
     std::filesystem::path data_root() const;
+    void rebuild_search_index();
 
     // Search across everything (step 44,60,73)
     struct SearchResult {
@@ -561,6 +571,11 @@ private:
     std::filesystem::path data_root_;
     std::filesystem::path luo_os_root_;
     LuoIndex              luo_os_index_;
+    mutable SearchIndex   search_index_;
+    bool                  search_index_dirty_ = true;
+    // Tick engine
+    std::atomic<bool>     tick_running_{false};
+    std::thread           tick_thread_;
     SessionState          session_;
     std::map<std::string, UserRecord>  users_;
     std::map<std::string, Workspace>   workspaces_;

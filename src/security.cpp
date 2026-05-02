@@ -20,7 +20,7 @@ std::string hex_byte(unsigned char b) {
 } // namespace
 
 bool is_valid_username(std::string_view username) {
-    return username.size() >= 3 && username.size() <= 6 && alpha_only(username);
+    return username.size() >= 3 && username.size() <= 32 && alpha_only(username);
 }
 
 bool is_valid_password(std::string_view password) {
