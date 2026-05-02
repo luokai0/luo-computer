@@ -320,6 +320,8 @@ bool App::add_agent(std::string id, std::string role, std::vector<std::string> e
 bool App::create_task(std::string title, std::string description, std::string kind, int priority) {
     if (active_user_.empty()) return false;
     auto& ws = workspace();
+    // Expand the full 10k swarm the first time a task is created
+    expand_swarm_if_needed(ws);
     TaskRecord task;
     task.id = "task-" + std::to_string(ws.tasks.size() + 1);
     task.title = std::move(title);
@@ -697,18 +699,44 @@ bool App::seed_agents_from_config(Workspace& ws) {
 
 void App::seed_default_swarm(Workspace& ws) {
     const auto seeds = std::vector<std::pair<std::string, std::vector<std::string>>>{
-        {"planner", {"planning", "decomposition"}},
-        {"builder", {"implementation", "execution"}},
-        {"reviewer", {"validation", "quality"}},
-        {"tester", {"verification", "debugging"}},
-        {"operator", {"orchestration", "delivery"}},
+        {"planner",    {"planning", "decomposition"}},
+        {"builder",    {"implementation", "execution"}},
+        {"reviewer",   {"validation", "quality"}},
+        {"tester",     {"verification", "debugging"}},
+        {"operator",   {"orchestration", "delivery"}},
         {"researcher", {"research", "synthesis"}},
-        {"designer", {"ux", "layout"}},
-        {"writer", {"docs", "copy"}},
-        {"monitor", {"telemetry", "watching"}},
-        {"safety", {"consent", "policy"}},
+        {"designer",   {"ux", "layout"}},
+        {"writer",     {"docs", "copy"}},
+        {"monitor",    {"telemetry", "watching"}},
+        {"safety",     {"consent", "policy"}},
     };
-    for (std::size_t i = 0; i < 10000; ++i) {
+    // Seed a small representative pool immediately (fast startup).
+    // The full 10k swarm is expanded lazily on first task creation.
+    const std::size_t initial_count = 100;
+    for (std::size_t i = 0; i < initial_count; ++i) {
+        const auto& seed = seeds[i % seeds.size()];
+        const double reliability = 0.92 - (static_cast<double>(i % seeds.size()) * 0.004);
+        ws.agents.push_back(AgentProfile{default_agent_id(i), default_agent_role(i) + "-" + seed.first, seed.second, 100, false, {}, reliability, "always", 1.0});
+    }
+}
+
+void App::expand_swarm_if_needed(Workspace& ws) {
+    if (ws.swarm_expanded) return;
+    ws.swarm_expanded = true;
+    const auto seeds = std::vector<std::pair<std::string, std::vector<std::string>>>{
+        {"planner",    {"planning", "decomposition"}},
+        {"builder",    {"implementation", "execution"}},
+        {"reviewer",   {"validation", "quality"}},
+        {"tester",     {"verification", "debugging"}},
+        {"operator",   {"orchestration", "delivery"}},
+        {"researcher", {"research", "synthesis"}},
+        {"designer",   {"ux", "layout"}},
+        {"writer",     {"docs", "copy"}},
+        {"monitor",    {"telemetry", "watching"}},
+        {"safety",     {"consent", "policy"}},
+    };
+    const std::size_t current = ws.agents.size();
+    for (std::size_t i = current; i < 10000; ++i) {
         const auto& seed = seeds[i % seeds.size()];
         const double reliability = 0.92 - (static_cast<double>(i % seeds.size()) * 0.004);
         ws.agents.push_back(AgentProfile{default_agent_id(i), default_agent_role(i) + "-" + seed.first, seed.second, 100, false, {}, reliability, "always", 1.0});

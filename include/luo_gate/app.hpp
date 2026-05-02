@@ -306,6 +306,8 @@ struct Workspace {
     std::vector<WindowRecord>  open_windows;
     // RBAC
     std::map<std::string, std::string> role_permissions; // user->role
+    // Lazy swarm: false until full 10k pool has been generated
+    bool swarm_expanded = false;
 };
 
 // ─── Summary ─────────────────────────────────────────────────────────────────
@@ -554,6 +556,7 @@ private:
     void seed_swarm(Workspace& ws);
     bool seed_agents_from_config(Workspace& ws);
     void seed_default_swarm(Workspace& ws);
+    void expand_swarm_if_needed(Workspace& ws);
     std::vector<std::string> roles_for_kind(std::string_view kind) const;
     std::vector<std::string> assign_agents(Workspace& ws,
                                             const std::vector<std::string>& roles,
@@ -578,6 +581,13 @@ private:
     std::atomic<bool>     tick_running_{false};
     std::thread           tick_thread_;
     mutable std::mutex    workspace_mutex_;
+
+public:
+    // Mutex for server threads to lock before calling any mutating method.
+    // The tick engine holds this same mutex during background ticks.
+    std::mutex& mutex() const { return workspace_mutex_; }
+
+private:
     SessionState          session_;
     std::map<std::string, UserRecord>  users_;
     std::map<std::string, Workspace>   workspaces_;

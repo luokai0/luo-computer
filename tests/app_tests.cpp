@@ -47,7 +47,8 @@ int main() {
     CHECK(app.login("Luo", "Gate"));
     CHECK(app.authenticated());
     CHECK(app.current_user() == "Luo");
-    CHECK(app.agent_count() == 10000);
+    // Lazy swarm: starts at 100, expands to 10k on first task creation
+    CHECK(app.agent_count() == 100);
     CHECK(app.computers().size() == 1);
     CHECK(app.tasks().empty());
     CHECK(app.luo_index_entries().empty());
