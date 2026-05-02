@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <string>
@@ -576,6 +577,7 @@ private:
     // Tick engine
     std::atomic<bool>     tick_running_{false};
     std::thread           tick_thread_;
+    mutable std::mutex    workspace_mutex_;
     SessionState          session_;
     std::map<std::string, UserRecord>  users_;
     std::map<std::string, Workspace>   workspaces_;

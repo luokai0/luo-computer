@@ -211,7 +211,9 @@ int run_server(App& app, int port) {
         const auto kind  = get_param(req.params, "kind", "general");
         const auto pri_s = get_param(req.params, "priority", "5");
         if (title.empty()) { json_err(res, 400, "title required"); return; }
-        const int priority = std::clamp(std::stoi(pri_s.empty() ? "5" : pri_s), 1, 10);
+        int priority = 5;
+        try { priority = std::clamp(std::stoi(pri_s.empty() ? "5" : pri_s), 1, 10); }
+        catch (...) { priority = 5; }
         if (app.create_task(title, desc, kind, priority)) {
             app.tick();
             json_ok(res, "{\"ok\":true}");
@@ -233,7 +235,9 @@ int run_server(App& app, int port) {
     svr.Post("/api/tasks/:id/priority", [&](const httplib::Request& req, httplib::Response& res) {
         const auto id  = req.path_params.at("id");
         const auto pri = get_param(req.params, "priority", "5");
-        const bool ok  = app.set_task_priority(id, std::stoi(pri));
+        int pval = 5;
+        try { pval = std::stoi(pri); } catch (...) { pval = 5; }
+        const bool ok  = app.set_task_priority(id, pval);
         json_ok(res, ok ? "{\"ok\":true}" : "{\"ok\":false}");
     });
 
@@ -269,7 +273,8 @@ int run_server(App& app, int port) {
     svr.Post("/api/files/:name/rollback", [&](const httplib::Request& req, httplib::Response& res) {
         const auto name    = req.path_params.at("name");
         const auto ver_s   = get_param(req.params, "version", "0");
-        const std::size_t ver = static_cast<std::size_t>(std::stoul(ver_s));
+        std::size_t ver = 0;
+        try { ver = static_cast<std::size_t>(std::stoul(ver_s)); } catch (...) { ver = 0; }
         json_ok(res, app.rollback_file(name, ver) ? "{\"ok\":true}" : "{\"ok\":false}");
     });
 

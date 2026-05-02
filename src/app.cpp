@@ -10,6 +10,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string_view>
@@ -979,8 +980,8 @@ bool StateIO::load_global(App& app) {
             app.session_.resumed = parts[1] == "1";
             app.session_.title = unquote(parts[2]);
             app.session_.note = unquote(parts[3]);
-            app.session_.last_started_at = std::stoll(parts[4]);
-            app.session_.last_resumed_at = std::stoll(parts[5]);
+            try { app.session_.last_started_at = std::stoll(parts[4]); } catch (...) {}
+            try { app.session_.last_resumed_at = std::stoll(parts[5]); } catch (...) {}
             if (parts.size() >= 7) {
                 app.session_.stage = session_stage_from_string(unquote(parts[6]));
             }
@@ -988,7 +989,7 @@ bool StateIO::load_global(App& app) {
                 app.session_.stage_detail = unquote(parts[7]);
             }
             if (parts.size() >= 9) {
-                app.session_.stage_updated_at = std::stoll(parts[8]);
+                try { app.session_.stage_updated_at = std::stoll(parts[8]); } catch (...) {}
             }
         } else if (kind == "user" && parts.size() >= 5) {
             const auto username = unquote(parts[1]);
@@ -1054,15 +1055,21 @@ bool StateIO::load_workspace(App& app, std::string_view username) {
             t.kind = unquote(parts[5]);
             t.status = unquote(parts[6]);
             t.owner = unquote(parts[1]);
-            t.step_cursor = static_cast<std::size_t>(std::stoull(parts[7]));
+            try { t.step_cursor = static_cast<std::size_t>(std::stoull(parts[7])); } catch (...) { t.step_cursor = 0; }
             t.assigned_agents = split(unquote(parts[8]), '|');
             ws.tasks.push_back(t);
         } else if (kind == "agent" && parts.size() >= 6 && unquote(parts[1]) == username) {
-            ws.agents.push_back(AgentProfile{unquote(parts[2]), unquote(parts[3]), split(unquote(parts[4]), '|'), std::stoi(parts[5]), false, {}});
+            int cap = 100;
+            try { cap = std::stoi(parts[5]); } catch (...) {}
+            ws.agents.push_back(AgentProfile{unquote(parts[2]), unquote(parts[3]), split(unquote(parts[4]), '|'), cap, false, {}});
         } else if (kind == "trace" && parts.size() >= 6 && unquote(parts[1]) == username) {
-            ws.trace.push_back(TraceEvent{static_cast<Timestamp>(std::stoll(parts[2])), unquote(parts[3]), unquote(parts[4]), unquote(parts[5]), parts.size() > 6 ? unquote(parts[6]) : std::string{}});
+            Timestamp ts = 0;
+            try { ts = static_cast<Timestamp>(std::stoll(parts[2])); } catch (...) {}
+            ws.trace.push_back(TraceEvent{ts, unquote(parts[3]), unquote(parts[4]), unquote(parts[5]), parts.size() > 6 ? unquote(parts[6]) : std::string{}});
         } else if (kind == "computer_action" && parts.size() >= 9 && unquote(parts[1]) == username) {
-            ws.computer_log.push_back(ComputerAction{static_cast<Timestamp>(std::stoll(parts[2])), unquote(parts[3]), unquote(parts[4]), unquote(parts[5]), unquote(parts[6]), unquote(parts[7]), unquote(parts[8])});
+            Timestamp ts = 0;
+            try { ts = static_cast<Timestamp>(std::stoll(parts[2])); } catch (...) {}
+            ws.computer_log.push_back(ComputerAction{ts, unquote(parts[3]), unquote(parts[4]), unquote(parts[5]), unquote(parts[6]), unquote(parts[7]), unquote(parts[8])});
         } else if (kind == "secret" && parts.size() >= 5 && unquote(parts[1]) == username) {
             ws.secrets.push_back(SecretRecord{unquote(parts[2]), unquote(parts[3]), unquote(parts[4])});
         } else if (kind == "file" && parts.size() >= 5 && unquote(parts[1]) == username) {
@@ -1976,18 +1983,15 @@ namespace luo_gate {
 void App::start_tick_engine(int interval_ms) {
     if (tick_running_.exchange(true)) return; // already running
     tick_thread_ = std::thread([this, interval_ms]() {
-        // Disable auto-save inside background thread to prevent concurrent I/O
-        const bool saved_auto_save = auto_save_;
-        auto_save_ = false;
         while (tick_running_.load(std::memory_order_relaxed)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(interval_ms));
             if (!tick_running_.load(std::memory_order_relaxed)) break;
+            std::lock_guard<std::mutex> lock(workspace_mutex_);
             if (!active_user_.empty()) {
                 tick();
                 check_agent_health(workspace());
             }
         }
-        auto_save_ = saved_auto_save;
     });
 }
 

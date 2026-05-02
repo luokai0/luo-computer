@@ -7,6 +7,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **Data race (critical):** tick engine background thread now holds `workspace_mutex_` before
+  calling `tick()` and `check_agent_health()`, preventing concurrent writes with the HTTP
+  server thread. Removed the broken `auto_save_` toggle workaround that was silently
+  dropping saves during background ticks.
+- **Server crash on bad input:** `POST /api/tasks` (priority param), `POST /api/tasks/:id/priority`,
+  and `POST /api/files/:name/rollback` all called `std::stoi`/`std::stoul` without try/catch.
+  A non-numeric value in any of these params would throw and crash the whole server process.
+  All three handlers are now guarded with try/catch and fall back to safe defaults.
+- **State load crash on corrupt file:** `stoll`, `stoull`, and `stoi` calls in `load_workspace`
+  and `load_global` now wrapped in try/catch. A single corrupt or truncated line in the
+  persistence file no longer crashes startup; the bad record is skipped and loading continues.
+
 ### Added (Steps 1-100)
 
 #### Core & Auth
