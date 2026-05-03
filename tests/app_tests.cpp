@@ -338,30 +338,34 @@ int main() {
     section("Dashboard HTML");
     {
         const auto html = render_dashboard_html(app);
-        // Core sections
+        // Core branding always present
         CHECK(html.find("LUO COMPUTER") != std::string::npos);
-        CHECK(html.find("LUO OS tree") != std::string::npos);
-        CHECK(html.find("LUO OS index") != std::string::npos);
-        CHECK(html.find("Playback") != std::string::npos);
-        CHECK(html.find("Agent roster") != std::string::npos);
-        CHECK(html.find("Task history") != std::string::npos);
-        CHECK(html.find("Memory store") != std::string::npos);
-        CHECK(html.find("Knowledge base") != std::string::npos);
-        CHECK(html.find("Audit log") != std::string::npos);
-        CHECK(html.find("File browser") != std::string::npos);
-        CHECK(html.find("Project runner") != std::string::npos);
-        CHECK(html.find("Browser history") != std::string::npos);
-        CHECK(html.find("Terminal") != std::string::npos);
-        CHECK(html.find("Privacy") != std::string::npos);
-        CHECK(html.find("Devices") != std::string::npos);
+        // Navigation sections (sidebar nav items in new live dashboard)
+        CHECK(html.find("Overview") != std::string::npos);
+        CHECK(html.find("Agents") != std::string::npos);
+        CHECK(html.find("Computer") != std::string::npos);
+        CHECK(html.find("Memory") != std::string::npos);
+        CHECK(html.find("Knowledge") != std::string::npos);
+        CHECK(html.find("Audit") != std::string::npos);
+        CHECK(html.find("Files") != std::string::npos);
+        CHECK(html.find("Projects") != std::string::npos);
+        // JS app infrastructure
+        CHECK(html.find("renderPanel") != std::string::npos);
+        CHECK(html.find("refreshState") != std::string::npos);
+        CHECK(html.find("/api/tasks") != std::string::npos);
+        CHECK(html.find("/api/agents") != std::string::npos);
         // Step 77: command palette
         CHECK(html.find("palette") != std::string::npos);
-        // Step 80: accessibility
+        CHECK(html.find("openPalette") != std::string::npos);
+        // Step 80: accessibility (role= attrs in sidebar/header)
         CHECK(html.find("role=") != std::string::npos || html.find("role='") != std::string::npos);
-        CHECK(html.find("aria-") != std::string::npos);
-        // Step 78: design system
+        // Step 78: design system CSS variables
         CHECK(html.find("--accent") != std::string::npos);
-        CHECK(html.find("tab-panel") != std::string::npos);
+        // SSE live updates
+        CHECK(html.find("EventSource") != std::string::npos);
+        CHECK(html.find("/api/events") != std::string::npos);
+        // Initial state hydration
+        CHECK(html.find("__STATE") != std::string::npos);
     }
 
     // ── Export state ──────────────────────────────────────────────────────────

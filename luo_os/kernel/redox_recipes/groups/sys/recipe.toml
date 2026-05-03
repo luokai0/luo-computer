@@ -1,9 +1,0 @@
-[package]
-dependencies = [
-    "bootloader",
-    "kernel",
-    "relibc",
-    "base",
-    "coreutils",
-    "base-initfs",
-]

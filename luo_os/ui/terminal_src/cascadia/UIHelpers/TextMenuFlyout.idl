@@ -1,7 +1,0 @@
-namespace Microsoft.Terminal.UI
-{
-    [default_interface] runtimeclass TextMenuFlyout : Windows.UI.Xaml.Controls.MenuFlyout
-    {
-        TextMenuFlyout();
-    }
-}

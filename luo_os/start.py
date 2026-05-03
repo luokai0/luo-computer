@@ -25,14 +25,25 @@ if sys.version_info < (3, 6):
 
 # ── Auto-install core deps ──────────────────────────────────────────
 import importlib.util
-missing = [pip for mod, pip in [("flask","flask"),("flask_cors","flask-cors")]
-           if not importlib.util.find_spec(mod)]
+missing = [pip for mod, pip in [
+    ("flask","flask"),("flask_cors","flask-cors"),("playwright","playwright"),
+] if not importlib.util.find_spec(mod)]
 if missing:
     print(f"\n  Installing: {', '.join(missing)}  (one-time)…\n")
     try:
         subprocess.check_call([sys.executable,"-m","pip","install","--quiet"]+missing,
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         step(f"Installed: {', '.join(missing)}")
+        # Install Chromium binary if playwright was just installed
+        if "playwright" in missing:
+            try:
+                subprocess.check_call(
+                    [sys.executable, "-m", "playwright", "install", "chromium"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+                step("Headless Chromium installed — browser can load any site")
+            except Exception:
+                pass
     except Exception:
         warn(f"Run: pip install {' '.join(missing)}")
         input("Press Enter to exit..."); sys.exit(1)
@@ -77,16 +88,12 @@ os.environ["LUO_PORT"]      = str(PORT)
 os.environ["LUO_USER_NAME"] = USER_NAME
 os.environ["LUO_AI_MODEL"]  = AI_MODEL
 os.environ["LUO_FEATURES"]  = ",".join(k for k,v in FEATURES.items() if v)
-os.environ["LUO_UI"]         = config.get("ui_mode", "classic")
 url = f"http://localhost:{PORT}"
 
 # ── Startup info ────────────────────────────────────────────────────
 print(f"  {DIM}{'─'*54}{R}")
 info(f"Welcome back, {W}{USER_NAME}{R}")
-ui_mode = config.get("ui_mode", "classic")
-info(f"Starting LuoOS  →  {G}{url}{R}  {DIM}(UI: {ui_mode}){R}")
-if ui_mode == "3d":
-    info(f"3D UI also at  →  {G}{url}/3d{R}")
+info(f"Starting LuoOS  →  {G}{url}{R}")
 
 # Model status
 from luokai.core.model_engine import MODELS_DIR, PRIMARY_MODEL, UPGRADE_MODEL

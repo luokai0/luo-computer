@@ -8,7 +8,6 @@
 namespace luo_gate {
 namespace {
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 std::string html_escape(std::string_view text) {
     std::ostringstream out;
     for (char c : text) {
@@ -17,7 +16,7 @@ std::string html_escape(std::string_view text) {
             case '<': out << "&lt;";   break;
             case '>': out << "&gt;";   break;
             case '"': out << "&quot;"; break;
-            case '\'': out << "&#39;"; break;
+            case '\'':out << "&#39;";  break;
             default:  out << c;        break;
         }
     }
@@ -42,946 +41,1089 @@ std::string json_escape(std::string_view text) {
     return out.str();
 }
 
-// Step 78: CSS design system
-const char* GLOBAL_CSS = R"CSS(
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --bg:#0b1020;--surface:#121a33;--surface2:#1a2240;--border:#243155;
-  --accent:#4c8eff;--accent2:#6ee7ff;--danger:#ff4d6a;--success:#3ddc84;
-  --warn:#ffb84d;--text:#e6edf3;--muted:#7a8ba8;--radius:14px;
-  --font:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-  --mono:'JetBrains Mono','Fira Code','Cascadia Code',monospace;
-}
-body{font-family:var(--font);background:var(--bg);color:var(--text);
-  margin:0;padding:0;min-height:100vh;font-size:14px;line-height:1.5}
-h1,h2{font-size:1.4rem;font-weight:700;color:var(--text);margin:0 0 4px}
-h3{font-size:1rem;font-weight:600;color:var(--accent2);margin:0 0 8px}
-h4{font-size:.875rem;font-weight:600;color:var(--muted);margin:4px 0}
-p{color:var(--muted);margin:4px 0}
-a{color:var(--accent);text-decoration:none}
-a:hover{text-decoration:underline}
-/* Layout */
-.topbar{background:var(--surface);border-bottom:1px solid var(--border);
-  padding:10px 24px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:100}
-.topbar-logo{font-weight:800;font-size:1.1rem;letter-spacing:.05em;color:var(--accent2)}
-.topbar-status{font-size:.8rem;color:var(--muted)}
-.topbar-right{margin-left:auto;display:flex;gap:8px;align-items:center}
-.main{padding:20px 24px;max-width:1600px;margin:0 auto}
-.grid{display:grid;gap:16px}
-.grid-3{grid-template-columns:260px 1fr 320px}
-.grid-2{grid-template-columns:1fr 1fr}
-.grid-auto{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
-/* Cards */
-.card{background:var(--surface);border:1px solid var(--border);
-  border-radius:var(--radius);padding:16px;overflow:hidden}
-.card-sm{padding:12px}
-/* Pills / chips */
-.pill{display:inline-flex;align-items:center;padding:5px 10px;
-  border-radius:8px;background:var(--surface2);border:1px solid var(--border);
-  font-size:.8rem;color:var(--text);white-space:nowrap;gap:6px}
-.pill-block{display:flex;width:100%;margin:4px 0}
-.pill.success{border-color:var(--success);color:var(--success)}
-.pill.danger{border-color:var(--danger);color:var(--danger)}
-.pill.warn{border-color:var(--warn);color:var(--warn)}
-.pill.accent{border-color:var(--accent);color:var(--accent)}
-.pill.muted{color:var(--muted)}
-/* Buttons */
-button,input,select{font-family:inherit;font-size:.85rem}
-.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;
-  border-radius:8px;border:1px solid var(--border);background:var(--surface2);
-  color:var(--text);cursor:pointer;transition:all .15s;white-space:nowrap}
-.btn:hover{background:var(--border);border-color:var(--accent)}
-.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
-.btn.primary:hover{background:#3a7ae0}
-.btn.danger{background:transparent;border-color:var(--danger);color:var(--danger)}
-.btn.danger:hover{background:var(--danger);color:#fff}
-.btn.sm{padding:4px 10px;font-size:.78rem;border-radius:6px}
-/* Inputs */
-.input{width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border);
-  background:var(--surface2);color:var(--text);outline:none}
-.input:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(76,142,255,.15)}
-/* Lists */
-.scroll-list{max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:4px}
-.scroll-list::-webkit-scrollbar{width:4px}
-.scroll-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
-/* Tables */
-.table{width:100%;border-collapse:collapse;font-size:.82rem}
-.table th{text-align:left;padding:6px 10px;color:var(--muted);
-  border-bottom:1px solid var(--border);font-weight:500}
-.table td{padding:6px 10px;border-bottom:1px solid rgba(36,49,85,.5)}
-.table tr:hover td{background:var(--surface2)}
-/* Tags */
-.tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:.72rem;
-  font-weight:600;letter-spacing:.03em}
-.tag-running{background:rgba(76,142,255,.15);color:var(--accent)}
-.tag-done{background:rgba(61,220,132,.12);color:var(--success)}
-.tag-queued{background:rgba(122,139,168,.12);color:var(--muted)}
-.tag-paused{background:rgba(255,184,77,.12);color:var(--warn)}
-.tag-failed{background:rgba(255,77,106,.12);color:var(--danger)}
-.tag-cancelled{background:rgba(255,77,106,.08);color:var(--danger)}
-/* Task inspector */
-.split{display:grid;grid-template-columns:220px 1fr;gap:12px;min-height:300px}
-.inspector-panel{background:var(--surface2);border:1px solid var(--border);
-  border-radius:12px;padding:14px;overflow-y:auto;max-height:400px}
-/* Playback timeline */
-.timeline{display:flex;flex-direction:column;gap:6px}
-.timeline-item{display:flex;gap:10px;align-items:flex-start}
-.timeline-dot{width:10px;height:10px;border-radius:50%;background:var(--accent);
-  margin-top:4px;flex-shrink:0;border:2px solid var(--border)}
-.timeline-dot.done{background:var(--success)}
-.timeline-dot.fail{background:var(--danger)}
-.timeline-body{flex:1}
-/* Agent grid */
-.agent-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
-.agent-card{background:var(--surface2);border:1px solid var(--border);
-  border-radius:10px;padding:10px;font-size:.8rem}
-.agent-card.busy{border-color:var(--accent)}
-.agent-card.degraded{border-color:var(--warn)}
-.agent-card.stuck{border-color:var(--danger)}
-/* Search */
-.search-bar{display:flex;gap:8px;margin-bottom:12px}
-.search-results{display:flex;flex-direction:column;gap:6px}
-.search-result{background:var(--surface2);border:1px solid var(--border);
-  border-radius:8px;padding:10px;font-size:.82rem}
-.search-result-kind{font-size:.7rem;font-weight:600;color:var(--accent);text-transform:uppercase}
-/* Command palette */
-.palette-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);
-  z-index:999;align-items:flex-start;justify-content:center;padding-top:80px}
-.palette-overlay.open{display:flex}
-.palette-box{background:var(--surface);border:1px solid var(--accent);
-  border-radius:14px;width:100%;max-width:560px;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.5)}
-.palette-input{width:100%;padding:14px 18px;background:transparent;border:none;
-  color:var(--text);font-size:1rem;outline:none}
-.palette-list{border-top:1px solid var(--border);max-height:280px;overflow-y:auto}
-.palette-item{padding:10px 18px;cursor:pointer;display:flex;gap:10px;align-items:center}
-.palette-item:hover,.palette-item.active{background:var(--surface2)}
-.palette-item-kind{font-size:.72rem;color:var(--muted);min-width:60px}
-/* Breadcrumbs */
-.breadcrumb{display:flex;gap:6px;align-items:center;font-size:.8rem;color:var(--muted);margin-bottom:12px}
-.breadcrumb-sep{color:var(--border)}
-/* Empty state */
-.empty{text-align:center;padding:32px;color:var(--muted)}
-.empty-icon{font-size:2rem;margin-bottom:8px}
-/* Loading */
-.skeleton{background:linear-gradient(90deg,var(--surface2) 25%,var(--border) 50%,var(--surface2) 75%);
-  background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:6px;height:14px}
-@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
-/* Privacy / consent */
-.consent-flag{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:.83rem}
-.consent-flag input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent)}
-/* Responsive */
-@media(max-width:960px){.grid-3{grid-template-columns:1fr}.topbar{padding:10px 16px}}
-@media(max-width:640px){.grid-2{grid-template-columns:1fr}.main{padding:12px}}
-/* Accessibility */
-:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-[aria-label],[title]{cursor:help}
-)CSS";
-
-// ─── CSS tag helper
-std::string status_tag(std::string_view status) {
+// ─── Initial state JSON snapshot (hydrates the live UI on first load) ─────────
+std::string initial_state_json(const App& app) {
+    const auto s = app.summary();
     std::ostringstream o;
-    o << "<span class='tag tag-" << html_escape(status) << "'>" << html_escape(status) << "</span>";
+    o << "{";
+    // summary
+    o << "\"summary\":{"
+      << "\"users\":"     << s.user_count    << ","
+      << "\"agents\":"    << s.agent_count   << ","
+      << "\"tasks\":"     << s.task_count    << ","
+      << "\"computers\":" << s.computer_count<< ","
+      << "\"files\":"     << s.file_count    << ","
+      << "\"projects\":"  << s.project_count << ","
+      << "\"memory\":"    << s.memory_count  << ","
+      << "\"knowledge\":" << s.knowledge_count<< ","
+      << "\"audit\":"     << s.audit_count   << ","
+      << "\"active_user\":" << "\"" << json_escape(s.active_user) << "\","
+      << "\"platform\":"     << "\"" << json_escape(s.platform)   << "\","
+      << "\"session_stage\":" << "\"" << json_escape(s.session_stage) << "\","
+      << "\"local_only\":" << (s.local_only_mode ? "true" : "false")
+      << "},";
+
+    // tasks
+    o << "\"tasks\":[";
+    bool first = true;
+    for (const auto& t : app.tasks()) {
+        if (!first) o << ",";
+        first = false;
+        o << "{"
+          << "\"id\":\"" << json_escape(t.id) << "\","
+          << "\"title\":\"" << json_escape(t.title) << "\","
+          << "\"description\":\"" << json_escape(t.description) << "\","
+          << "\"kind\":\"" << json_escape(t.kind) << "\","
+          << "\"status\":\"" << json_escape(t.status) << "\","
+          << "\"priority\":" << t.priority << ","
+          << "\"step_cursor\":" << t.step_cursor << ","
+          << "\"plan_size\":" << t.plan.size() << ","
+          << "\"validated\":" << (t.validated ? "true" : "false") << ","
+          << "\"confidence\":" << t.confidence << ","
+          << "\"plan\":[";
+        bool fp = true;
+        for (const auto& step : t.plan) {
+            if (!fp) o << ",";
+            fp = false;
+            o << "{\"actor\":\"" << json_escape(step.actor) << "\","
+              << "\"action\":\"" << json_escape(step.action) << "\","
+              << "\"detail\":\"" << json_escape(step.detail) << "\","
+              << "\"status\":\"" << json_escape(step.status) << "\"}";
+        }
+        o << "],\"memory\":[";
+        fp = true;
+        for (const auto& m : t.memory) {
+            if (!fp) o << ",";
+            fp = false;
+            o << "\"" << json_escape(m) << "\"";
+        }
+        o << "]}";
+    }
+    o << "],";
+
+    // agents (first 100)
+    o << "\"agents\":[";
+    first = true;
+    for (const auto& a : app.agents(100)) {
+        if (!first) o << ",";
+        first = false;
+        o << "{"
+          << "\"id\":\"" << json_escape(a.id) << "\","
+          << "\"role\":\"" << json_escape(a.role) << "\","
+          << "\"busy\":" << (a.busy ? "true" : "false") << ","
+          << "\"health\":\"" << json_escape(a.health) << "\","
+          << "\"reliability\":" << a.reliability << ","
+          << "\"load\":" << a.load << ","
+          << "\"task_id\":\"" << json_escape(a.task_id) << "\""
+          << "}";
+    }
+    o << "],";
+
+    // computer log
+    o << "\"computer_log\":[";
+    first = true;
+    for (const auto& a : app.computer_log(50)) {
+        if (!first) o << ",";
+        first = false;
+        o << "{"
+          << "\"agent_id\":\"" << json_escape(a.agent_id) << "\","
+          << "\"surface\":\"" << json_escape(a.surface) << "\","
+          << "\"verb\":\"" << json_escape(a.verb) << "\","
+          << "\"target\":\"" << json_escape(a.target) << "\","
+          << "\"detail\":\"" << json_escape(a.detail.substr(0,80)) << "\","
+          << "\"undone\":" << (a.undone ? "true" : "false")
+          << "}";
+    }
+    o << "],";
+
+    // pending approvals
+    o << "\"pending_approvals\":[";
+    first = true;
+    for (const auto& p : app.pending_approvals()) {
+        if (!first) o << ",";
+        first = false;
+        o << "\"" << json_escape(p) << "\"";
+    }
+    o << "]}";
     return o.str();
-}
-
-// ─── Topbar (step 71)
-void append_topbar(std::ostringstream& out, const App& app) {
-    const auto s = app.summary();
-    out << "<header class='topbar' role='banner'>"
-        << "<span class='topbar-logo' aria-label='LUO COMPUTER'>⬡ LUO COMPUTER</span>"
-        << "<span class='topbar-status pill'>" << html_escape(s.session_stage) << "</span>"
-        << "<span class='topbar-status'>" << html_escape(s.platform) << "</span>";
-    if (s.local_only_mode)
-        out << "<span class='pill muted' title='No outbound network calls'>🔒 local-only</span>";
-    out << "<div class='topbar-right'>"
-        << "<button class='btn sm' onclick='openPalette()' title='Open command palette (Ctrl+K)' aria-label='Command palette'>⌘ Commands</button>"
-        << "<span class='pill'>" << html_escape(s.active_user) << "</span>"
-        << "</div></header>";
-}
-
-// ─── Summary cards (step 75)
-void append_summary_cards(std::ostringstream& out, const App& app) {
-    const auto s = app.summary();
-    struct Card { const char* label; std::size_t val; const char* icon; };
-    const Card cards[] = {
-        {"Agents",   s.agent_count,    "🤖"},
-        {"Tasks",    s.task_count,     "📋"},
-        {"Computers",s.computer_count, "🖥"},
-        {"Files",    s.file_count,     "📁"},
-        {"Skills",   s.skill_count,    "⚡"},
-        {"Projects", s.project_count,  "🚀"},
-        {"Devices",  s.device_count,   "📱"},
-        {"Memory",   s.memory_count,   "🧠"},
-        {"KB",       s.knowledge_count,"📚"},
-    };
-    out << "<div class='grid grid-auto' style='margin-bottom:16px'>";
-    for (const auto& c : cards) {
-        out << "<div class='card card-sm' style='text-align:center'>"
-            << "<div style='font-size:1.4rem'>" << c.icon << "</div>"
-            << "<div style='font-size:1.5rem;font-weight:700;color:var(--accent2)'>"
-            << c.val << "</div>"
-            << "<div style='font-size:.75rem;color:var(--muted)'>" << c.label << "</div>"
-            << "</div>";
-    }
-    out << "</div>";
-}
-
-// ─── Task data as JSON (step 2, 10, 39)
-std::string task_data_json(const App& app) {
-    std::ostringstream out;
-    out << "[";
-    const auto tasks = app.tasks();
-    for (std::size_t i = 0; i < tasks.size(); ++i) {
-        const auto& task = tasks[i];
-        if (i) out << ",";
-        out << "{";
-        out << "\"id\":\"" << json_escape(task.id) << "\",";
-        out << "\"title\":\"" << json_escape(task.title) << "\",";
-        out << "\"description\":\"" << json_escape(task.description) << "\",";
-        out << "\"kind\":\"" << json_escape(task.kind) << "\",";
-        out << "\"status\":\"" << json_escape(task.status) << "\",";
-        out << "\"owner\":\"" << json_escape(task.owner) << "\",";
-        out << "\"priority\":" << task.priority << ",";
-        out << "\"step_cursor\":" << task.step_cursor << ",";
-        out << "\"confidence\":" << task.confidence << ",";
-        out << "\"validated\":" << (task.validated ? "true" : "false") << ",";
-        out << "\"assigned_agents\":[";
-        for (std::size_t j = 0; j < task.assigned_agents.size(); ++j) {
-            if (j) out << ",";
-            out << "\"" << json_escape(task.assigned_agents[j]) << "\"";
-        }
-        out << "],\"plan\":[";
-        for (std::size_t j = 0; j < task.plan.size(); ++j) {
-            const auto& step = task.plan[j];
-            if (j) out << ",";
-            out << "{";
-            out << "\"index\":" << step.index << ",";
-            out << "\"actor\":\"" << json_escape(step.actor) << "\",";
-            out << "\"action\":\"" << json_escape(step.action) << "\",";
-            out << "\"detail\":\"" << json_escape(step.detail) << "\",";
-            out << "\"surface\":\"" << json_escape(step.surface) << "\",";
-            out << "\"status\":\"" << json_escape(step.status) << "\"";
-            out << "}";
-        }
-        out << "],\"subtasks\":[";
-        for (std::size_t j = 0; j < task.subtasks.size(); ++j) {
-            const auto& sub = task.subtasks[j];
-            if (j) out << ",";
-            out << "{\"id\":\"" << json_escape(sub.id) << "\","
-                << "\"title\":\"" << json_escape(sub.title) << "\","
-                << "\"status\":\"" << json_escape(sub.status) << "\","
-                << "\"kind\":\"" << json_escape(sub.kind) << "\"}";
-        }
-        out << "],\"memory\":[";
-        for (std::size_t j = 0; j < task.memory.size(); ++j) {
-            if (j) out << ",";
-            out << "\"" << json_escape(task.memory[j]) << "\"";
-        }
-        out << "]}";
-    }
-    out << "]";
-    return out.str();
-}
-
-// ─── Task inspector (step 2, 10) ─────────────────────────────────────────────
-void append_task_history(std::ostringstream& out, const App& app);
-
-void append_task_inspector(std::ostringstream& out, const App& app) {
-    const auto tasks = app.tasks();
-    out << "<div class='split'>"
-        << "<div class='scroll-list'>";
-    if (tasks.empty()) {
-        out << "<div class='empty'><div class='empty-icon'>📋</div>"
-               "<div>No tasks yet</div></div>";
-    }
-    for (std::size_t i = 0; i < tasks.size(); ++i) {
-        const auto& task = tasks[i];
-        out << "<button type='button' class='btn pill-block task-btn' data-task-index='" << i << "' "
-            << "style='text-align:left;justify-content:flex-start;gap:8px'>"
-            << status_tag(task.status)
-            << "<span style='overflow:hidden;text-overflow:ellipsis'>"
-            << html_escape(task.title) << "</span>"
-            << "<span style='margin-left:auto;color:var(--muted);font-size:.7rem'>P" << task.priority << "</span>"
-            << "</button>";
-    }
-    out << "</div>"
-        << "<div class='inspector-panel' id='task-inspector' role='region' aria-label='Task details'>"
-        << "<div class='empty'><div class='empty-icon'>👆</div><div>Select a task</div></div>"
-        << "</div></div>"
-        << "<script id='task-data' type='application/json'>" << task_data_json(app) << "</script>"
-        << "<script>(function(){"
-        << "const data=JSON.parse(document.getElementById('task-data').textContent||'[]');"
-        << "const panel=document.getElementById('task-inspector');"
-        << "const statusColors={running:'var(--accent)',done:'var(--success)',queued:'var(--muted)',paused:'var(--warn)',failed:'var(--danger)',cancelled:'var(--danger)'};"
-        << "function render(t){"
-        << "if(!t){panel.innerHTML='<div class=\"empty\">Select a task</div>';return;}"
-        << "const color=statusColors[t.status]||'var(--muted)';"
-        << "let h=`<div style='margin-bottom:10px'>`;"
-        << "h+=`<div style='display:flex;align-items:center;gap:8px;margin-bottom:6px'>`;"
-        << "h+=`<span style='font-size:1rem;font-weight:700'>${t.title}</span>`;"
-        << "h+=`<span class='tag tag-${t.status}'>${t.status}</span>`;"
-        << "if(t.validated) h+=`<span class='pill success' style='font-size:.7rem'>✓ validated</span>`;"
-        << "h+=`</div>`;"
-        << "h+=`<div style='font-size:.78rem;color:var(--muted)'>${t.id} · ${t.kind} · Priority ${t.priority} · Confidence ${(t.confidence*100).toFixed(0)}%</div>`;"
-        << "h+=`<p style='margin-top:6px'>${t.description}</p>`;"
-        << "h+=`</div>`;"
-        << "if(t.assigned_agents.length) h+=`<div class='pill' style='margin-bottom:8px'>Agents: ${t.assigned_agents.slice(0,3).join(', ')}${t.assigned_agents.length>3?' + more':''}</div>`;"
-        << "h+=`<h4>Plan (step ${t.step_cursor}/${t.plan.length})</h4>`;"
-        << "h+=`<div class='timeline'>`;"
-        << "t.plan.forEach((step,idx)=>{"
-        << "const active=idx===t.step_cursor;"
-        << "const done=idx<t.step_cursor;"
-        << "h+=`<div class='timeline-item'>`;"
-        << "h+=`<div class='timeline-dot ${done?'done':''}${active?' active':''}'></div>`;"
-        << "h+=`<div class='timeline-body'><strong>${step.actor}</strong> ${step.action}`;"
-        << "if(step.detail) h+=` — <span style='color:var(--muted)'>${step.detail}</span>`;"
-        << "if(active) h+=` <span style='color:var(--accent);font-size:.75rem'>▶ current</span>`;"
-        << "h+=`</div></div>`;"
-        << "});"
-        << "h+=`</div>`;"
-        << "if(t.subtasks.length){h+=`<h4 style='margin-top:10px'>Subtasks</h4>`;"
-        << "t.subtasks.forEach(s=>{h+=`<div class='pill pill-block'><span class='tag tag-${s.status}'>${s.status}</span>${s.title}</div>`;});}"
-        << "if(t.memory.length){h+=`<h4 style='margin-top:10px'>Memory</h4>`;"
-        << "t.memory.forEach(m=>{h+=`<div class='pill pill-block' style='color:var(--muted);font-size:.78rem'>${m}</div>`;});}"
-        << "panel.innerHTML=h;}"
-        << "document.querySelectorAll('.task-btn').forEach(btn=>btn.addEventListener('click',()=>render(data[+btn.dataset.taskIndex])));"
-        << "if(data.length)render(data[0]);"
-        << "window.selectTask=i=>render(data[i]);"
-        << "})();</script>";
-    append_task_history(out, app);
-}
-
-// ─── Task history (step 10: filter/search/reopen) ────────────────────────────
-void append_task_history(std::ostringstream& out, const App& app) {
-    const auto tasks = app.tasks();
-    out << "<div style='margin-top:16px'>"
-        << "<h3>Task history</h3>"
-        << "<div style='display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap'>"
-        << "<input class='input' id='task-filter-text' placeholder='Search tasks...' style='max-width:200px' oninput='filterTasks()' aria-label='Search tasks'>"
-        << "<select class='input' id='task-filter-status' onchange='filterTasks()' style='max-width:130px' aria-label='Filter by status'>"
-        << "<option value=''>All status</option>"
-        << "<option>queued</option><option>running</option><option>done</option>"
-        << "<option>paused</option><option>failed</option><option>cancelled</option>"
-        << "</select>"
-        << "<select class='input' id='task-filter-kind' onchange='filterTasks()' style='max-width:130px' aria-label='Filter by kind'>"
-        << "<option value=''>All kinds</option>"
-        << "<option>build</option><option>research</option><option>ops</option>"
-        << "<option>ui</option><option>demo</option>"
-        << "</select></div>"
-        << "<div class='scroll-list' id='task-history-list'>";
-    for (const auto& task : tasks) {
-        out << "<div class='search-result task-history-row' "
-            << "data-status='" << html_escape(task.status) << "' "
-            << "data-kind='" << html_escape(task.kind) << "' "
-            << "data-title='" << html_escape(task.title) << "'>"
-            << "<div style='display:flex;align-items:center;gap:6px'>"
-            << status_tag(task.status)
-            << "<strong>" << html_escape(task.title) << "</strong>"
-            << "<span style='margin-left:auto;font-size:.75rem;color:var(--muted)'>"
-            << html_escape(task.kind) << " · P" << task.priority << "</span>"
-            << "</div>"
-            << "<div style='font-size:.78rem;color:var(--muted);margin-top:2px'>"
-            << html_escape(task.description.substr(0, 80)) << "</div>"
-            << "</div>";
-    }
-    if (tasks.empty())
-        out << "<div class='empty'><div class='empty-icon'>📋</div><div>No task history</div></div>";
-    out << "</div></div>"
-        << "<script>(function(){"
-        << "window.filterTasks=function(){"
-        << "const q=document.getElementById('task-filter-text').value.toLowerCase();"
-        << "const st=document.getElementById('task-filter-status').value;"
-        << "const kd=document.getElementById('task-filter-kind').value;"
-        << "document.querySelectorAll('.task-history-row').forEach(row=>{"
-        << "const title=row.dataset.title.toLowerCase();"
-        << "const ok=(!q||title.includes(q))&&(!st||row.dataset.status===st)&&(!kd||row.dataset.kind===kd);"
-        << "row.style.display=ok?'':'none';});};})();</script>";
-}
-
-// ─── Computer playback timeline (steps 21,29) ─────────────────────────────────
-void append_computer_playback(std::ostringstream& out, const App& app) {
-    const auto log = app.computer_log(50);
-    out << "<div class='timeline' id='playback-timeline'>";
-    if (log.empty()) {
-        out << "<div class='empty'><div class='empty-icon'>🖥</div>"
-               "<div>No computer activity yet</div></div>";
-    }
-    for (std::size_t i = 0; i < log.size(); ++i) {
-        const auto& a = log[i];
-        const bool is_undo = a.undone;
-        out << "<div class='timeline-item' style='" << (is_undo ? "opacity:.4" : "") << "'>"
-            << "<div class='timeline-dot " << (is_undo ? "" : "done") << "'></div>"
-            << "<div class='timeline-body'>"
-            << "<span style='font-size:.72rem;color:var(--muted)'>#" << (i+1) << " · " << html_escape(a.surface) << "</span> "
-            << "<strong>" << html_escape(a.agent_id) << "</strong> "
-            << "<span class='pill' style='font-size:.72rem'>" << html_escape(a.verb) << "</span> "
-            << html_escape(a.target);
-        if (!a.detail.empty())
-            out << " <span style='color:var(--muted);font-size:.78rem'>— " << html_escape(a.detail.substr(0, 60)) << "</span>";
-        if (is_undo)
-            out << " <span style='color:var(--danger);font-size:.72rem'>[undone]</span>";
-        out << "</div></div>";
-    }
-    out << "</div>";
-}
-
-// ─── LUO OS tree browser (step 1) ─────────────────────────────────────────────
-void append_luo_tree(std::ostringstream& out, const App& app) {
-    out << "<h3>LUO OS tree</h3>";
-    const auto entries = app.search_luo_os("", 300);
-    if (entries.empty()) {
-        out << "<div class='empty'><div class='empty-icon'>🌲</div>"
-               "<div>No LUO OS index loaded</div></div>";
-        return;
-    }
-    out << "<div class='scroll-list'>";
-    std::string last_group;
-    for (const auto& entry : entries) {
-        const auto slash = entry.path.find('/');
-        const auto group = slash == std::string::npos ? entry.path : entry.path.substr(0, slash);
-        if (group != last_group) {
-            last_group = group;
-            out << "<div class='pill' style='background:var(--border);color:var(--accent2);font-weight:600;margin-top:6px'>"
-                << "📂 " << html_escape(group) << "</div>";
-        }
-        if (slash != std::string::npos) {
-            out << "<div class='pill pill-block' style='padding-left:20px;font-size:.78rem'>"
-                << (entry.kind == "dir" ? "📁 " : "📄 ")
-                << html_escape(entry.path.substr(slash+1)) << "</div>";
-        }
-    }
-    out << "</div>";
-}
-
-// ─── LUO OS index (step 9) ────────────────────────────────────────────────────
-void append_luo_index(std::ostringstream& out, const App& app) {
-    out << "<h3>LUO OS index</h3>";
-    const auto entries = app.luo_index_entries(20);
-    if (entries.empty()) {
-        out << "<div class='empty' style='font-size:.82rem'>Index empty</div>";
-        return;
-    }
-    out << "<div class='scroll-list'>";
-    for (const auto& entry : entries) {
-        out << "<div class='pill pill-block'>"
-            << "<span class='tag' style='background:var(--surface);color:var(--accent)'>" << html_escape(entry.kind) << "</span>"
-            << " " << html_escape(entry.path)
-            << "</div>";
-    }
-    out << "</div>";
-}
-
-// ─── Agent roster (steps 12-20, 6) ────────────────────────────────────────────
-void append_agents(std::ostringstream& out, const App& app) {
-    const auto all_agents = app.agents(20);
-    const auto counts = app.role_counts();
-    out << "<div style='margin-bottom:10px;display:flex;gap:8px;flex-wrap:wrap'>";
-    for (const auto& [role, count] : counts) {
-        out << "<span class='pill'>" << html_escape(role) << " <strong>" << count << "</strong></span>";
-    }
-    out << "</div>"
-        << "<div class='agent-grid'>";
-    for (const auto& agent : all_agents) {
-        const auto css = agent.health == "stuck" ? "stuck" :
-                         agent.health == "degraded" ? "degraded" :
-                         agent.busy ? "busy" : "";
-        out << "<div class='agent-card " << css << "' role='article' aria-label='" << html_escape(agent.id) << "'>"
-            << "<div style='font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>"
-            << html_escape(agent.id) << "</div>"
-            << "<div style='color:var(--muted);font-size:.75rem'>" << html_escape(agent.role) << "</div>"
-            << "<div style='display:flex;gap:4px;margin-top:4px;flex-wrap:wrap'>";
-        if (agent.busy)
-            out << "<span class='tag tag-running'>busy</span>";
-        else
-            out << "<span class='tag tag-done'>free</span>";
-        out << "<span class='pill' style='font-size:.68rem'>"
-            << static_cast<int>(agent.reliability * 100) << "% reliable</span>";
-        out << "</div></div>";
-    }
-    const auto total = app.agent_count();
-    if (total > 20)
-        out << "<div class='pill' style='grid-column:1/-1;color:var(--muted);font-size:.78rem'>+ "
-            << (total - 20) << " more agents</div>";
-    out << "</div>";
-}
-
-// ─── Browser history (step 23) ────────────────────────────────────────────────
-void append_browser_history(std::ostringstream& out, const App& app) {
-    const auto history = app.browser_history(10);
-    if (history.empty()) {
-        out << "<div class='empty' style='font-size:.82rem'>No browser history</div>";
-        return;
-    }
-    out << "<div class='scroll-list'>";
-    for (const auto& snap : history) {
-        out << "<div class='search-result'>"
-            << "<div style='font-weight:600;font-size:.82rem'>" << html_escape(snap.title) << "</div>"
-            << "<div style='font-size:.75rem;color:var(--accent)'>" << html_escape(snap.url) << "</div>";
-        if (!snap.text_excerpt.empty())
-            out << "<div style='font-size:.75rem;color:var(--muted);margin-top:2px'>"
-                << html_escape(snap.text_excerpt.substr(0, 80)) << "</div>";
-        out << "</div>";
-    }
-    out << "</div>";
-}
-
-// ─── Terminal history (step 24) ────────────────────────────────────────────────
-void append_terminal_history(std::ostringstream& out, const App& app) {
-    const auto history = app.terminal_history(8);
-    if (history.empty()) {
-        out << "<div class='empty' style='font-size:.82rem'>No terminal history</div>";
-        return;
-    }
-    out << "<div class='scroll-list'>";
-    for (const auto& t : history) {
-        const bool ok = t.exit_code == 0;
-        out << "<div style='background:var(--surface2);border-radius:8px;padding:8px;font-family:var(--mono);font-size:.78rem;margin-bottom:4px'>"
-            << "<div style='color:var(--accent2)'>$ " << html_escape(t.command) << "</div>"
-            << "<div style='color:" << (ok ? "var(--success)" : "var(--danger)") << ";margin-top:2px'>"
-            << html_escape(t.output.substr(0, 100)) << "</div>"
-            << "<div style='color:var(--muted);font-size:.7rem'>exit " << t.exit_code << "</div>"
-            << "</div>";
-    }
-    out << "</div>";
-}
-
-// ─── File browser (step 5, 25) ────────────────────────────────────────────────
-void append_file_browser(std::ostringstream& out, const App& app) {
-    const auto files = app.files();
-    if (files.empty()) {
-        out << "<div class='empty'><div class='empty-icon'>📁</div><div>No files</div></div>";
-        return;
-    }
-    out << "<table class='table' role='grid' aria-label='Files'>"
-        << "<thead><tr><th>Name</th><th>Size</th><th>Versions</th><th>Scope</th></tr></thead><tbody>";
-    for (const auto& f : files) {
-        out << "<tr>"
-            << "<td><span style='font-family:var(--mono);font-size:.82rem'>" << html_escape(f.name) << "</span></td>"
-            << "<td style='color:var(--muted)'>" << f.content.size() << " B</td>"
-            << "<td style='color:var(--muted)'>" << f.history.size() << "</td>"
-            << "<td style='color:var(--muted)'>" << html_escape(f.project_scope.empty() ? "—" : f.project_scope) << "</td>"
-            << "</tr>";
-    }
-    out << "</tbody></table>";
-}
-
-// ─── Project runner (steps 51-57) ─────────────────────────────────────────────
-void append_project_runner(std::ostringstream& out, const App& app) {
-    const auto projects = app.projects();
-    if (projects.empty()) {
-        out << "<div class='empty'><div class='empty-icon'>🚀</div><div>No projects</div></div>";
-        return;
-    }
-    out << "<div class='scroll-list'>";
-    for (const auto& proj : projects) {
-        const bool ok = proj.last_exit_code == 0;
-        const bool ran = proj.last_exit_code >= 0;
-        out << "<div class='card card-sm' style='margin-bottom:6px'>"
-            << "<div style='display:flex;align-items:center;gap:8px'>"
-            << "<strong>" << html_escape(proj.name) << "</strong>";
-        if (!proj.template_kind.empty())
-            out << "<span class='pill' style='font-size:.7rem'>" << html_escape(proj.template_kind) << "</span>";
-        if (ran)
-            out << "<span class='pill " << (ok ? "success" : "danger") << "' style='font-size:.7rem'>exit " << proj.last_exit_code << "</span>";
-        out << "</div>"
-            << "<div style='font-family:var(--mono);font-size:.75rem;color:var(--muted);margin-top:4px'>"
-            << "$ " << html_escape(proj.command) << "</div>";
-        if (!proj.last_output.empty())
-            out << "<div style='font-family:var(--mono);font-size:.72rem;color:var(--success);margin-top:4px;max-height:60px;overflow:hidden'>"
-                << html_escape(proj.last_output.substr(0, 200)) << "</div>";
-        out << "</div>";
-    }
-    out << "</div>";
-}
-
-// ─── Knowledge base (step 47) ────────────────────────────────────────────────
-void append_knowledge(std::ostringstream& out, const App& app) {
-    const auto entries = app.knowledge_entries(20);
-    if (entries.empty()) {
-        out << "<div class='empty'><div class='empty-icon'>📚</div><div>No knowledge entries</div></div>";
-        return;
-    }
-    out << "<div class='scroll-list'>";
-    for (const auto& k : entries) {
-        out << "<div class='search-result'>"
-            << "<div style='font-weight:600'>" << html_escape(k.title) << "</div>"
-            << "<div style='font-size:.78rem;color:var(--muted);margin-top:2px'>"
-            << html_escape(k.body.substr(0, 80)) << "</div>"
-            << "</div>";
-    }
-    out << "</div>";
-}
-
-// ─── Memory viewer (steps 41-50) ─────────────────────────────────────────────
-void append_memory(std::ostringstream& out, const App& app) {
-    const auto entries = app.memory_entries(15);
-    if (entries.empty()) {
-        out << "<div class='empty'><div class='empty-icon'>🧠</div><div>No memory entries</div></div>";
-        return;
-    }
-    out << "<div class='scroll-list'>";
-    for (const auto& m : entries) {
-        out << "<div class='pill pill-block' style='flex-direction:column;align-items:flex-start'>"
-            << "<span class='tag' style='background:var(--surface);color:var(--muted);margin-bottom:4px'>"
-            << html_escape(m.kind) << "</span>"
-            << "<span style='font-size:.8rem'>" << html_escape(m.content.substr(0, 80)) << "</span>";
-        if (m.summarized)
-            out << "<span style='font-size:.7rem;color:var(--warn)'>[summarized]</span>";
-        out << "</div>";
-    }
-    out << "</div>";
-}
-
-// ─── Privacy dashboard (step 69) ─────────────────────────────────────────────
-void append_privacy_dashboard(std::ostringstream& out, const App& app) {
-    const auto c = app.consent();
-    const auto s = app.summary();
-    out << "<div style='font-size:.82rem'>"
-        << "<div class='consent-flag'><input type='checkbox' " << (c.allow_local_storage ? "checked" : "") << " disabled> Local storage</div>"
-        << "<div class='consent-flag'><input type='checkbox' " << (c.allow_files ? "checked" : "") << " disabled> File access</div>"
-        << "<div class='consent-flag'><input type='checkbox' " << (c.allow_chat_history ? "checked" : "") << " disabled> Chat history</div>"
-        << "<div class='consent-flag'><input type='checkbox' " << (c.allow_project_execution ? "checked" : "") << " disabled> Project execution</div>"
-        << "<div class='consent-flag'><input type='checkbox' " << (c.allow_device_links ? "checked" : "") << " disabled> Device links</div>"
-        << "<div class='consent-flag'><input type='checkbox' " << (c.allow_analytics ? "checked" : "") << " disabled> Analytics</div>"
-        << "<div class='consent-flag'><input type='checkbox' " << (s.local_only_mode ? "checked" : "") << " disabled> 🔒 Local-only mode</div>"
-        << "</div>"
-        << "<div style='margin-top:8px;font-size:.75rem;color:var(--muted)'>"
-        << "Stored: " << s.memory_count << " memories · " << s.audit_count << " audit events · "
-        << s.file_count << " files · " << s.secret_count << " secrets"
-        << "</div>";
-}
-
-// ─── Audit log (steps 64, 66) ────────────────────────────────────────────────
-void append_audit_log(std::ostringstream& out, const App& app) {
-    const auto log = app.audit_log(20);
-    if (log.empty()) {
-        out << "<div class='empty' style='font-size:.82rem'>No audit events</div>";
-        return;
-    }
-    out << "<div class='scroll-list'>";
-    for (const auto& e : log) {
-        out << "<div class='pill pill-block' style='font-size:.78rem'>"
-            << "<span style='color:var(--muted)'>[" << html_escape(e.actor) << "]</span> "
-            << "<strong>" << html_escape(e.action) << "</strong>"
-            << " — " << html_escape(e.detail)
-            << "</div>";
-    }
-    out << "</div>";
-}
-
-// ─── Devices (step 8, 62) ────────────────────────────────────────────────────
-void append_devices(std::ostringstream& out, const App& app) {
-    const auto devices = app.devices();
-    if (devices.empty()) {
-        out << "<div class='empty' style='font-size:.82rem'>No devices linked</div>";
-        return;
-    }
-    out << "<div class='scroll-list'>";
-    for (const auto& dev : devices) {
-        out << "<div class='pill pill-block'>"
-            << (dev.approved ? "✅ " : "⏳ ")
-            << html_escape(dev.label)
-            << " <span style='margin-left:auto;color:var(--muted);font-size:.75rem'>"
-            << html_escape(dev.id) << "</span>"
-            << "</div>";
-    }
-    out << "</div>";
-}
-
-// ─── Pending approvals (step 62, 84) ─────────────────────────────────────────
-void append_pending_approvals(std::ostringstream& out, const App& app) {
-    const auto pending = app.pending_approvals();
-    if (pending.empty()) return;
-    out << "<div class='card' style='border-color:var(--warn);margin-top:12px'>"
-        << "<h3 style='color:var(--warn)'>⚠ Pending Approvals</h3>";
-    for (const auto& action : pending) {
-        out << "<div class='pill pill-block warn'>"
-            << "🔐 " << html_escape(action)
-            << "<button class='btn sm danger' style='margin-left:auto'>Approve</button>"
-            << "</div>";
-    }
-    out << "</div>";
-}
-
-// ─── Command palette (step 77) ────────────────────────────────────────────────
-void append_command_palette(std::ostringstream& out, const App& app) {
-    out << "<div class='palette-overlay' id='palette-overlay' role='dialog' aria-label='Command palette' aria-modal='true'>"
-        << "<div class='palette-box'>"
-        << "<input class='palette-input' id='palette-input' placeholder='Type a command or search...' autocomplete='off' aria-label='Command input'>"
-        << "<div class='palette-list' id='palette-list'></div>"
-        << "</div></div>"
-        << "<script>(function(){"
-        << "const commands=["
-        << "{kind:'action',label:'Create task',icon:'📋'},"
-        << "{kind:'action',label:'Kill all agents',icon:'🛑'},"
-        << "{kind:'action',label:'Pause session',icon:'⏸'},"
-        << "{kind:'action',label:'Resume session',icon:'▶'},"
-        << "{kind:'action',label:'Export workspace',icon:'📦'},"
-        << "{kind:'nav',label:'Go to Tasks',icon:'📋'},"
-        << "{kind:'nav',label:'Go to Agents',icon:'🤖'},"
-        << "{kind:'nav',label:'Go to Files',icon:'📁'},"
-        << "{kind:'nav',label:'Go to Projects',icon:'🚀'},"
-        << "{kind:'nav',label:'Go to Memory',icon:'🧠'},"
-        << "{kind:'nav',label:'Go to Knowledge',icon:'📚'},"
-        << "{kind:'nav',label:'Go to Audit log',icon:'🔍'},"
-        << "];"
-        << "const overlay=document.getElementById('palette-overlay');"
-        << "const input=document.getElementById('palette-input');"
-        << "const list=document.getElementById('palette-list');"
-        << "let active=0;"
-        << "function render(q){"
-        << "const filtered=commands.filter(c=>c.label.toLowerCase().includes(q.toLowerCase()));"
-        << "list.innerHTML=filtered.map((c,i)=>`<div class='palette-item ${i===active?'active':''}' data-idx='${i}'>"
-        << "<span class='palette-item-kind'>${c.kind}</span>"
-        << "<span>${c.icon} ${c.label}</span></div>`).join('');"
-        << "}"
-        << "window.openPalette=function(){"
-        << "overlay.classList.add('open');input.value='';render('');input.focus();};"
-        << "overlay.addEventListener('click',e=>{if(e.target===overlay)overlay.classList.remove('open');});"
-        << "input.addEventListener('input',()=>{active=0;render(input.value);});"
-        << "input.addEventListener('keydown',e=>{"
-        << "if(e.key==='Escape'){overlay.classList.remove('open');}"
-        << "if(e.key==='ArrowDown'){active++;render(input.value);}"
-        << "if(e.key==='ArrowUp'){active=Math.max(0,active-1);render(input.value);}"
-        << "});"
-        << "document.addEventListener('keydown',e=>{"
-        << "if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();window.openPalette();}"
-        << "});"
-        << "})();</script>";
-}
-
-// ─── Tab navigation (step 77) ─────────────────────────────────────────────────
-void append_tabs(std::ostringstream& out,
-                 const std::vector<std::pair<std::string,std::string>>& tabs) {
-    out << "<div style='display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:16px;overflow-x:auto' role='tablist'>";
-    for (std::size_t i = 0; i < tabs.size(); ++i) {
-        out << "<button type='button' class='btn" << (i==0?" primary":"") << "' "
-            << "onclick='showTab(" << i << ")' "
-            << "id='tab-btn-" << i << "' role='tab' "
-            << "aria-selected='" << (i==0?"true":"false") << "' "
-            << "aria-controls='tab-panel-" << i << "'>"
-            << html_escape(tabs[i].first) << "</button>";
-    }
-    out << "</div>";
-    for (std::size_t i = 0; i < tabs.size(); ++i) {
-        out << "<div id='tab-panel-" << i << "' role='tabpanel' "
-            << "aria-labelledby='tab-btn-" << i << "' "
-            << (i==0?"":"style='display:none'") << ">"
-            << tabs[i].second << "</div>";
-    }
-    out << "<script>(function(){"
-        << "window.showTab=function(n){"
-        << "document.querySelectorAll('[role=tabpanel]').forEach((p,i)=>p.style.display=i===n?'':'none');"
-        << "document.querySelectorAll('[role=tab]').forEach((b,i)=>{"
-        << "b.classList.toggle('primary',i===n);"
-        << "b.setAttribute('aria-selected',i===n);});};"
-        << "})();</script>";
-}
-
-// ─── Recent activity (step 8) ────────────────────────────────────────────────
-void append_recent_activity(std::ostringstream& out, const App& app) {
-    const auto traces = app.trace_events(12);
-    const auto clog = app.computer_log(8);
-    if (traces.empty() && clog.empty()) {
-        out << "<div class='empty'><div class='empty-icon'>⚡</div><div>No activity yet</div></div>";
-        return;
-    }
-    out << "<div class='scroll-list'>";
-    for (const auto& e : traces) {
-        out << "<div class='pill pill-block' style='font-size:.78rem'>"
-            << "<span style='color:var(--muted)'>" << html_escape(e.actor) << "</span> "
-            << "<strong>" << html_escape(e.action) << "</strong>"
-            << " — " << html_escape(e.detail.substr(0, 60)) << "</div>";
-    }
-    if (!clog.empty()) {
-        out << "<div style='border-top:1px solid var(--border);margin:8px 0'></div>";
-        for (const auto& a : clog) {
-            out << "<div class='pill pill-block' style='font-size:.78rem'>"
-                << "🖥 " << html_escape(a.agent_id)
-                << " · " << html_escape(a.verb)
-                << " <span style='color:var(--muted)'>" << html_escape(a.target) << "</span>"
-                << "</div>";
-        }
-    }
-    out << "</div>";
-}
-
-// ─── Computers section (step 21, 22) ─────────────────────────────────────────
-void append_computers(std::ostringstream& out, const App& app) {
-    const auto computers = app.computers();
-    if (computers.empty()) {
-        out << "<div class='empty'><div class='empty-icon'>🖥</div><div>No computers</div></div>";
-        return;
-    }
-    for (const auto& comp : computers) {
-        out << "<div class='card card-sm' style='margin-bottom:8px'>"
-            << "<div style='display:flex;align-items:center;gap:8px'>"
-            << "<strong>" << html_escape(comp.label) << "</strong>"
-            << "<span class='pill' style='font-size:.72rem'>" << html_escape(comp.os) << "</span>"
-            << (comp.active ? "<span class='pill success' style='font-size:.72rem'>active</span>" : "")
-            << "</div>"
-            << "<div style='display:flex;gap:4px;margin-top:6px;flex-wrap:wrap'>";
-        for (const auto& surf : comp.surfaces)
-            out << "<span class='pill' style='font-size:.72rem'>" << html_escape(surf) << "</span>";
-        out << "</div>";
-        if (!comp.windows.empty()) {
-            out << "<div style='margin-top:6px;font-size:.78rem;color:var(--muted)'>Windows: ";
-            for (const auto& w : comp.windows)
-                out << html_escape(w.title) << (w.focused ? " 🔵" : "") << " ";
-            out << "</div>";
-        }
-        out << "</div>";
-    }
 }
 
 } // anonymous namespace
 
-// ─── Main dashboard (steps 71-80) ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// render_dashboard_html — single-page live dashboard
+// ─────────────────────────────────────────────────────────────────────────────
 std::string render_dashboard_html(const App& app) {
+    const auto state_json = initial_state_json(app);
+    const auto s = app.summary();
+
     std::ostringstream out;
-    out << "<!doctype html><html lang='en'><head>"
-        << "<meta charset='utf-8'>"
-        << "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        << "<title>LUO COMPUTER</title>"
-        << "<style>" << GLOBAL_CSS << "</style>"
-        << "</head><body>";
+    out << R"(<!doctype html><html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LUO COMPUTER</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#080d1a;--surface:#0f1629;--surface2:#162038;--border:#1e2d4d;
+  --accent:#4c8eff;--accent2:#6ee7ff;--danger:#ff4d6a;--success:#3ddc84;
+  --warn:#ffb84d;--text:#e6edf3;--muted:#5a6a8a;--radius:12px;
+  --font:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --mono:'JetBrains Mono','Fira Code',monospace;
+}
+body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100vh;font-size:13px;line-height:1.5}
+h1,h2{font-size:1.3rem;font-weight:700;margin:0 0 4px}
+h3{font-size:.9rem;font-weight:600;color:var(--accent2);margin:0 0 10px;text-transform:uppercase;letter-spacing:.05em}
+p{color:var(--muted);margin:4px 0}
+/* Topbar */
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);
+  padding:8px 20px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:100}
+.logo{font-weight:900;font-size:1rem;letter-spacing:.08em;color:var(--accent2);
+  display:flex;align-items:center;gap:6px}
+.logo-hex{font-size:1.2rem}
+.topbar-right{margin-left:auto;display:flex;gap:6px;align-items:center}
+/* Layout */
+.shell{display:grid;grid-template-columns:200px 1fr;min-height:calc(100vh - 41px)}
+.sidebar{background:var(--surface);border-right:1px solid var(--border);
+  padding:12px 0;display:flex;flex-direction:column;gap:2px;overflow-y:auto}
+.nav-item{padding:8px 16px;cursor:pointer;border-radius:0;font-size:.85rem;
+  display:flex;align-items:center;gap:8px;color:var(--muted);border:none;
+  background:none;width:100%;text-align:left;transition:all .1s}
+.nav-item:hover{background:var(--surface2);color:var(--text)}
+.nav-item.active{background:var(--surface2);color:var(--accent);border-right:2px solid var(--accent)}
+.nav-sep{border-top:1px solid var(--border);margin:8px 12px}
+.content{padding:20px;overflow-y:auto;max-height:calc(100vh - 41px)}
+/* Cards */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+.card+.card{margin-top:12px}
+/* Stat row */
+.stat-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  padding:10px 16px;display:flex;flex-direction:column;align-items:center;min-width:80px;flex:1}
+.stat-val{font-size:1.6rem;font-weight:800;color:var(--accent2);line-height:1}
+.stat-lbl{font-size:.7rem;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.05em}
+/* Buttons */
+button,input,select,textarea{font-family:inherit;font-size:.84rem}
+.btn{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;
+  border-radius:8px;border:1px solid var(--border);background:var(--surface2);
+  color:var(--text);cursor:pointer;transition:all .12s;white-space:nowrap}
+.btn:hover{border-color:var(--accent);background:var(--border)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.btn.primary:hover{background:#3a7ae0}
+.btn.danger{border-color:var(--danger);color:var(--danger)}
+.btn.danger:hover{background:var(--danger);color:#fff}
+.btn.success{border-color:var(--success);color:var(--success)}
+.btn.sm{padding:3px 9px;font-size:.76rem;border-radius:6px}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* Inputs */
+.input{width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border);
+  background:var(--surface2);color:var(--text);outline:none}
+.input:focus{border-color:var(--accent)}
+/* Tags */
+.tag{display:inline-block;padding:2px 7px;border-radius:4px;font-size:.7rem;font-weight:600}
+.tag-running{background:rgba(76,142,255,.15);color:var(--accent)}
+.tag-done{background:rgba(61,220,132,.12);color:var(--success)}
+.tag-queued{background:rgba(90,106,138,.15);color:var(--muted)}
+.tag-paused{background:rgba(255,184,77,.12);color:var(--warn)}
+.tag-failed,.tag-cancelled{background:rgba(255,77,106,.12);color:var(--danger)}
+/* Pills */
+.pill{display:inline-flex;align-items:center;padding:4px 9px;border-radius:6px;
+  background:var(--surface2);border:1px solid var(--border);font-size:.78rem;gap:5px}
+.pill.ok{border-color:var(--success);color:var(--success)}
+.pill.warn{border-color:var(--warn);color:var(--warn)}
+.pill.err{border-color:var(--danger);color:var(--danger)}
+/* Scrollable list */
+.scroll-list{display:flex;flex-direction:column;gap:4px;max-height:340px;overflow-y:auto}
+.scroll-list::-webkit-scrollbar{width:3px}
+.scroll-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+/* Timeline */
+.timeline{display:flex;flex-direction:column;gap:6px}
+.tl-item{display:flex;gap:8px;align-items:flex-start}
+.tl-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);margin-top:5px;flex-shrink:0}
+.tl-dot.done{background:var(--success)}
+.tl-dot.active{background:var(--accent);box-shadow:0 0 6px var(--accent)}
+.tl-dot.fail{background:var(--danger)}
+/* Agent grid */
+.agent-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px}
+.agent-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px;font-size:.78rem}
+.agent-card.busy{border-color:var(--accent)}
+.agent-card.stuck{border-color:var(--danger)}
+.agent-card.degraded{border-color:var(--warn)}
+/* Table */
+.table{width:100%;border-collapse:collapse;font-size:.82rem}
+.table th{text-align:left;padding:6px 8px;color:var(--muted);border-bottom:1px solid var(--border);font-weight:500}
+.table td{padding:6px 8px;border-bottom:1px solid rgba(30,45,77,.5);vertical-align:middle}
+.table tr:hover td{background:var(--surface2)}
+/* Terminal */
+.terminal{background:#020510;border-radius:8px;padding:10px;font-family:var(--mono);font-size:.78rem;max-height:200px;overflow-y:auto}
+.terminal .cmd{color:var(--accent2)}
+.terminal .out{color:var(--success)}
+.terminal .err{color:var(--danger)}
+/* Empty */
+.empty{text-align:center;padding:28px;color:var(--muted)}
+.empty-icon{font-size:1.8rem;margin-bottom:6px}
+/* Badge */
+.badge{display:inline-flex;align-items:center;justify-content:center;
+  min-width:18px;height:18px;border-radius:9px;background:var(--danger);
+  color:#fff;font-size:.68rem;font-weight:700;padding:0 5px}
+/* Modal */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:500;
+  align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:20px;width:100%;max-width:480px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+.modal h3{margin-bottom:14px}
+.form-row{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+.form-row label{font-size:.78rem;color:var(--muted)}
+/* Command palette */
+.palette-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:999;
+  align-items:flex-start;justify-content:center;padding-top:80px}
+.palette-overlay.open{display:flex}
+.palette{background:var(--surface);border:1px solid var(--accent);border-radius:14px;
+  width:100%;max-width:540px;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.5)}
+.palette input{width:100%;padding:14px 16px;background:transparent;border:none;
+  color:var(--text);font-size:.95rem;outline:none}
+.palette-list{border-top:1px solid var(--border);max-height:260px;overflow-y:auto}
+.palette-item{padding:9px 16px;cursor:pointer;display:flex;gap:8px;align-items:center;font-size:.84rem}
+.palette-item:hover,.palette-item.sel{background:var(--surface2)}
+.palette-item-cat{font-size:.68rem;color:var(--muted);min-width:50px;text-transform:uppercase}
+/* Toast */
+.toast-area{position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:6px;z-index:900}
+.toast{background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:10px 14px;font-size:.82rem;animation:slide-in .2s ease}
+.toast.ok{border-color:var(--success);color:var(--success)}
+.toast.err{border-color:var(--danger);color:var(--danger)}
+@keyframes slide-in{from{transform:translateX(100%);opacity:0}to{transform:none;opacity:1}}
+/* Live indicator */
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--success);
+  animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+/* Responsive */
+@media(max-width:800px){.shell{grid-template-columns:1fr}.sidebar{display:none}}
+</style>
+</head><body>)";
 
-    append_topbar(out, app);
-    append_command_palette(out, app);
-    append_pending_approvals(out, app);
+    // ── Topbar ────────────────────────────────────────────────────────────────
+    out << "<header class='topbar'>"
+        << "<div class='logo'><span class='logo-hex'>⬡</span> LUO COMPUTER</div>"
+        << "<span class='pill' id='tb-stage'>" << html_escape(s.session_stage) << "</span>"
+        << "<span class='pill' style='gap:6px'><span class='live-dot'></span>live</span>"
+        << "<div class='topbar-right'>"
+        << "<button class='btn sm' onclick='openPalette()' title='Ctrl+K'>⌘ K</button>"
+        << "<button class='btn sm primary' onclick='openNewTask()'>+ Task</button>"
+        << "<span class='pill'>" << html_escape(s.active_user) << "</span>"
+        << (s.local_only_mode ? "<span class='pill'>🔒 local</span>" : "")
+        << "</div></header>";
 
-    out << "<main class='main' role='main'>";
-    append_summary_cards(out, app);
+    // ── Shell ─────────────────────────────────────────────────────────────────
+    out << "<div class='shell'>";
 
-    // Build tab contents
-    std::vector<std::pair<std::string,std::string>> tabs;
+    // Sidebar
+    out << "<nav class='sidebar' role='navigation'>"
+        << "<button class='nav-item active' onclick='nav(this,\"overview\")'>🏠 Overview</button>"
+        << "<button class='nav-item' onclick='nav(this,\"tasks\")'>📋 Tasks"
+        << "<span class='badge' id='nav-task-badge'>" << s.task_count << "</span></button>"
+        << "<button class='nav-item' onclick='nav(this,\"agents\")'>🤖 Agents</button>"
+        << "<button class='nav-item' onclick='nav(this,\"computer\")'>🖥 Computer</button>"
+        << "<div class='nav-sep'></div>"
+        << "<button class='nav-item' onclick='nav(this,\"files\")'>📁 Files</button>"
+        << "<button class='nav-item' onclick='nav(this,\"projects\")'>🚀 Projects</button>"
+        << "<button class='nav-item' onclick='nav(this,\"memory\")'>🧠 Memory</button>"
+        << "<button class='nav-item' onclick='nav(this,\"knowledge\")'>📚 Knowledge</button>"
+        << "<div class='nav-sep'></div>"
+        << "<button class='nav-item' onclick='nav(this,\"audit\")'>🔍 Audit</button>"
+        << "<button class='nav-item' onclick='nav(this,\"settings\")'>⚙ Settings</button>"
+        << "</nav>";
 
-    // Tab: Overview
-    {
-        std::ostringstream t;
-        t << "<div class='grid grid-3'>"
-          << "<div style='display:flex;flex-direction:column;gap:12px'>"
-          << "<div class='card'><h3>Recent activity</h3>";
-        append_recent_activity(t, app);
-        t << "</div>"
-          << "<div class='card'><h3>Computers</h3>";
-        append_computers(t, app);
-        t << "</div>"
-          << "<div class='card'><h3>Privacy</h3>";
-        append_privacy_dashboard(t, app);
-        t << "</div></div>"
-          << "<div class='card'>"
-          << "<h3>Tasks</h3>";
-        append_task_inspector(t, app);
-        t << "</div>"
-          << "<div style='display:flex;flex-direction:column;gap:12px'>"
-          << "<div class='card'><h3>LUO OS tree</h3>";
-        append_luo_tree(t, app);
-        t << "</div>"
-          << "<div class='card'>";
-        append_luo_index(t, app);
-        t << "</div></div></div>";
-        tabs.push_back({"🏠 Overview", t.str()});
+    // Content area - all panels defined in JS for live updates
+    out << "<div class='content' id='content'>"
+        << "<div id='loading' style='padding:40px;text-align:center;color:var(--muted)'>Loading...</div>"
+        << "</div></div>";
+
+    // Toast area
+    out << "<div class='toast-area' id='toasts'></div>";
+
+    // New Task modal
+    out << R"(
+<div class='modal-overlay' id='modal-new-task'>
+<div class='modal'>
+<h3>📋 New Task</h3>
+<div class='form-row'><label>Title</label>
+<input class='input' id='nt-title' placeholder='What needs to be done?'></div>
+<div class='form-row'><label>Description</label>
+<textarea class='input' id='nt-desc' rows='3' placeholder='Optional detail...'></textarea></div>
+<div class='form-row'><label>Kind</label>
+<select class='input' id='nt-kind'>
+<option value='research'>Research</option>
+<option value='build'>Build</option>
+<option value='ops'>Ops</option>
+<option value='ui'>UI</option>
+<option value='general'>General</option>
+</select></div>
+<div class='form-row'><label>Priority (1=highest, 10=lowest)</label>
+<input class='input' id='nt-priority' type='number' min='1' max='10' value='5'></div>
+<div style='display:flex;gap:8px;justify-content:flex-end;margin-top:4px'>
+<button class='btn' onclick='closeNewTask()'>Cancel</button>
+<button class='btn primary' onclick='submitNewTask()'>Create Task</button>
+</div></div></div>)";
+
+    // Command palette
+    out << R"(
+<div class='palette-overlay' id='palette'>
+<div class='palette'>
+<input id='palette-input' placeholder='Command or search...' autocomplete='off'>
+<div class='palette-list' id='palette-list'></div>
+</div></div>)";
+
+    // Embed initial state + JS app
+    out << "<script>const __STATE=" << state_json << ";</script>";
+
+    out << R"JS(<script>
+// ─── State ───────────────────────────────────────────────────────────────────
+let state = __STATE;
+let currentPanel = 'overview';
+let sseConnected = false;
+
+// ─── API ─────────────────────────────────────────────────────────────────────
+async function api(method, path, params={}) {
+  try {
+    let url = path;
+    if (method === 'GET' && Object.keys(params).length) {
+      url += '?' + new URLSearchParams(params).toString();
     }
-
-    // Tab: Agents
-    {
-        std::ostringstream t;
-        t << "<div class='card'><h3>Agent roster (" << app.agent_count() << ")</h3>";
-        append_agents(t, app);
-        t << "</div>";
-        tabs.push_back({"🤖 Agents", t.str()});
+    const opts = { method };
+    if (method === 'POST' && Object.keys(params).length) {
+      url += '?' + new URLSearchParams(params).toString();
     }
+    const res = await fetch(url, opts);
+    const data = await res.json();
+    return data;
+  } catch(e) {
+    toast('Network error: ' + e.message, 'err');
+    return null;
+  }
+}
 
-    // Tab: Computer surface
-    {
-        std::ostringstream t;
-        t << "<div class='grid grid-2'>"
-          << "<div class='card'><h3>Playback timeline</h3>";
-        append_computer_playback(t, app);
-        t << "</div>"
-          << "<div style='display:flex;flex-direction:column;gap:12px'>"
-          << "<div class='card'><h3>Browser history</h3>";
-        append_browser_history(t, app);
-        t << "</div>"
-          << "<div class='card'><h3>Terminal</h3>";
-        append_terminal_history(t, app);
-        t << "</div></div></div>";
-        tabs.push_back({"🖥 Computer", t.str()});
-    }
+async function refreshState() {
+  const [summary, tasks, agents, log] = await Promise.all([
+    api('GET', '/api/summary'),
+    api('GET', '/api/tasks'),
+    api('GET', '/api/agents'),
+    api('GET', '/api/computer/log'),
+  ]);
+  if (summary) state.summary = summary;
+  if (tasks)   state.tasks   = tasks;
+  if (agents)  state.agents  = agents;
+  if (log)     state.computer_log = log;
+  updateTopbar();
+  renderPanel(currentPanel);
+}
 
-    // Tab: Files
-    {
-        std::ostringstream t;
-        t << "<div class='card'><h3>File browser</h3>";
-        append_file_browser(t, app);
-        t << "</div>";
-        tabs.push_back({"📁 Files", t.str()});
-    }
+// ─── SSE live updates ─────────────────────────────────────────────────────────
+function connectSSE() {
+  const es = new EventSource('/api/events');
+  es.onmessage = (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.agents !== undefined) state.summary.agents = d.agents;
+      if (d.tasks  !== undefined) state.summary.tasks  = d.tasks;
+      if (d.stage  !== undefined) state.summary.session_stage = d.stage;
+      if (d.audit  !== undefined) state.summary.audit  = d.audit;
+      updateTopbar();
+      // Full refresh every 10s via SSE cadence
+      if (!sseConnected) { sseConnected = true; refreshState(); }
+    } catch {}
+  };
+  es.onerror = () => { sseConnected = false; setTimeout(connectSSE, 3000); };
+}
 
-    // Tab: Projects
-    {
-        std::ostringstream t;
-        t << "<div class='card'><h3>Project runner</h3>";
-        append_project_runner(t, app);
-        t << "</div>";
-        tabs.push_back({"🚀 Projects", t.str()});
-    }
+// ─── Topbar live ─────────────────────────────────────────────────────────────
+function updateTopbar() {
+  const el = document.getElementById('tb-stage');
+  if (el) el.textContent = state.summary.session_stage || 'idle';
+  const badge = document.getElementById('nav-task-badge');
+  if (badge) badge.textContent = state.summary.tasks || 0;
+}
 
-    // Tab: Memory & Knowledge
-    {
-        std::ostringstream t;
-        t << "<div class='grid grid-2'>"
-          << "<div class='card'><h3>Memory store</h3>";
-        append_memory(t, app);
-        t << "</div>"
-          << "<div class='card'><h3>Knowledge base</h3>";
-        append_knowledge(t, app);
-        t << "</div></div>";
-        tabs.push_back({"🧠 Memory", t.str()});
-    }
+// ─── Toast ───────────────────────────────────────────────────────────────────
+function toast(msg, type='ok') {
+  const area = document.getElementById('toasts');
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.textContent = msg;
+  area.appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
 
-    // Tab: Audit & Devices
-    {
-        std::ostringstream t;
-        t << "<div class='grid grid-2'>"
-          << "<div class='card'><h3>Audit log</h3>";
-        append_audit_log(t, app);
-        t << "</div>"
-          << "<div class='card'><h3>Devices</h3>";
-        append_devices(t, app);
-        t << "</div></div>";
-        tabs.push_back({"🔍 Audit", t.str()});
-    }
+// ─── Navigation ──────────────────────────────────────────────────────────────
+function nav(btn, panel) {
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentPanel = panel;
+  renderPanel(panel);
+}
 
-    append_tabs(out, tabs);
-    out << "</main></body></html>";
+function renderPanel(panel) {
+  const content = document.getElementById('content');
+  switch(panel) {
+    case 'overview':  content.innerHTML = renderOverview();  break;
+    case 'tasks':     content.innerHTML = renderTasks();     break;
+    case 'agents':    content.innerHTML = renderAgents();    break;
+    case 'computer':  content.innerHTML = renderComputer();  break;
+    case 'files':     content.innerHTML = renderFiles();     break;
+    case 'projects':  content.innerHTML = renderProjects();  break;
+    case 'memory':    content.innerHTML = renderMemory();    break;
+    case 'knowledge': content.innerHTML = renderKnowledge(); break;
+    case 'audit':     content.innerHTML = renderAudit();     break;
+    case 'settings':  content.innerHTML = renderSettings();  break;
+    default:          content.innerHTML = renderOverview();
+  }
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function tag(status) {
+  return `<span class="tag tag-${status}">${status}</span>`;
+}
+
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─── Overview panel ──────────────────────────────────────────────────────────
+function renderOverview() {
+  const s = state.summary;
+  const stats = [
+    ['🤖', s.agents,   'Agents'],
+    ['📋', s.tasks,    'Tasks'],
+    ['🖥', s.computers,'Computers'],
+    ['📁', s.files,    'Files'],
+    ['🚀', s.projects, 'Projects'],
+    ['🧠', s.memory,   'Memory'],
+    ['📚', s.knowledge,'Knowledge'],
+    ['🔍', s.audit,    'Audit'],
+  ];
+  let h = '<div class="stat-row">';
+  stats.forEach(([icon,val,lbl]) => {
+    h += `<div class="stat"><div class="stat-val">${val??0}</div><div class="stat-lbl">${lbl}</div></div>`;
+  });
+  h += '</div>';
+
+  // Recent tasks
+  h += '<div class="card"><h3>Active Tasks</h3>';
+  const active = (state.tasks||[]).filter(t => t.status === 'running' || t.status === 'queued');
+  if (!active.length) h += '<div class="empty"><div class="empty-icon">📋</div>No active tasks</div>';
+  else {
+    h += '<div class="scroll-list">';
+    active.forEach(t => {
+      h += `<div style="display:flex;align-items:center;gap:8px;padding:8px;background:var(--surface2);border-radius:8px;cursor:pointer" onclick="navToTask('${escHtml(t.id)}')">
+        ${tag(t.status)}
+        <span style="flex:1;font-weight:600">${escHtml(t.title)}</span>
+        <span style="color:var(--muted);font-size:.75rem">P${t.priority} · step ${t.step_cursor}/${t.plan_size}</span>
+        <button class="btn sm" onclick="event.stopPropagation();tickTask('${escHtml(t.id)}')">▶ tick</button>
+        <button class="btn sm danger" onclick="event.stopPropagation();cancelTask('${escHtml(t.id)}')">✕</button>
+      </div>`;
+    });
+    h += '</div>';
+  }
+  h += '</div>';
+
+  // Computer log preview
+  h += '<div class="card" style="margin-top:12px"><h3>Computer Activity</h3>';
+  const log = (state.computer_log||[]).slice(-8).reverse();
+  if (!log.length) h += '<div class="empty"><div class="empty-icon">🖥</div>No activity</div>';
+  else {
+    h += '<div class="timeline">';
+    log.forEach(a => {
+      const cls = a.undone ? 'tl-dot' : 'tl-dot done';
+      h += `<div class="tl-item">
+        <div class="${cls}"></div>
+        <div style="font-size:.8rem">
+          <strong>${escHtml(a.agent_id)}</strong>
+          <span class="pill" style="font-size:.7rem">${escHtml(a.verb)}</span>
+          ${escHtml(a.target)}
+          ${a.detail ? `<span style="color:var(--muted)"> — ${escHtml(a.detail)}</span>` : ''}
+        </div>
+      </div>`;
+    });
+    h += '</div>';
+  }
+  h += '</div>';
+
+  return h;
+}
+
+// ─── Tasks panel ─────────────────────────────────────────────────────────────
+function renderTasks() {
+  const tasks = state.tasks || [];
+  let h = `<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+    <input class="input" id="task-search" placeholder="Search tasks..." style="max-width:200px" oninput="filterTaskList()">
+    <select class="input" id="task-status-filter" onchange="filterTaskList()" style="max-width:130px">
+      <option value="">All status</option>
+      <option>queued</option><option>running</option><option>done</option>
+      <option>paused</option><option>failed</option><option>cancelled</option>
+    </select>
+    <button class="btn primary" onclick="openNewTask()">+ New Task</button>
+    <button class="btn" onclick="refreshState()">↻ Refresh</button>
+  </div>
+  <div style="display:grid;grid-template-columns:240px 1fr;gap:12px">
+  <div class="scroll-list" id="task-list-col" style="max-height:calc(100vh - 180px)">`;
+
+  tasks.forEach((t,i) => {
+    h += `<div class="task-row" data-status="${escHtml(t.status)}" data-title="${escHtml(t.title)}"
+      style="padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;cursor:pointer"
+      onclick="showTaskDetail(${i})">
+      <div style="display:flex;align-items:center;gap:6px">
+        ${tag(t.status)}
+        <span style="font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.title)}</span>
+      </div>
+      <div style="font-size:.72rem;color:var(--muted);margin-top:2px">${escHtml(t.kind)} · P${t.priority}</div>
+    </div>`;
+  });
+  if (!tasks.length) h += '<div class="empty"><div class="empty-icon">📋</div>No tasks</div>';
+  h += '</div>';
+
+  // Detail panel
+  h += '<div id="task-detail" class="card"><div class="empty"><div class="empty-icon">👆</div>Select a task</div></div>';
+  h += '</div>';
+
+  h += `<script>
+window.filterTaskList = function() {
+  const q = document.getElementById('task-search').value.toLowerCase();
+  const st = document.getElementById('task-status-filter').value;
+  document.querySelectorAll('.task-row').forEach(r => {
+    const ok = (!q || r.dataset.title.toLowerCase().includes(q)) && (!st || r.dataset.status === st);
+    r.style.display = ok ? '' : 'none';
+  });
+};
+window.showTaskDetail = function(i) {
+  const t = (state.tasks||[])[i];
+  if (!t) return;
+  const detail = document.getElementById('task-detail');
+  if (!detail) return;
+  let dh = \`<h3>\${escHtml(t.title)}</h3>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+      \${tag(t.status)}
+      <span class="pill">\${escHtml(t.kind)}</span>
+      <span class="pill">Priority \${t.priority}</span>
+      \${t.validated ? "<span class='pill ok'>✓ validated</span>" : ""}
+    </div>
+    <p style="margin-bottom:12px">\${escHtml(t.description||'')}</p>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">\`;
+  if (t.status === 'queued' || t.status === 'running')
+    dh += \`<button class="btn sm" onclick="tickTask('\${t.id}')">▶ Tick</button>
+           <button class="btn sm" onclick="pauseTask('\${t.id}')">⏸ Pause</button>
+           <button class="btn sm danger" onclick="cancelTask('\${t.id}')">✕ Cancel</button>\`;
+  if (t.status === 'paused')
+    dh += \`<button class="btn sm success" onclick="resumeTask('\${t.id}')">▶ Resume</button>
+           <button class="btn sm danger" onclick="cancelTask('\${t.id}')">✕ Cancel</button>\`;
+  if (t.status === 'cancelled' || t.status === 'failed' || t.status === 'done')
+    dh += \`<button class="btn sm" onclick="reopenTask('\${t.id}')">↺ Reopen</button>\`;
+  dh += \`<button class="btn sm" onclick="validateTask('\${t.id}')">✓ Validate</button></div>\`;
+
+  // Plan steps
+  dh += \`<h3>Plan (\${t.step_cursor}/\${t.plan_size} steps)</h3><div class="timeline">\`;
+  (t.plan||[]).forEach((step, idx) => {
+    const done = idx < t.step_cursor;
+    const active = idx === t.step_cursor;
+    const cls = done ? 'done' : active ? 'active' : '';
+    dh += \`<div class="tl-item">
+      <div class="tl-dot \${cls}"></div>
+      <div style="font-size:.8rem"><strong>\${escHtml(step.actor)}</strong> \${escHtml(step.action)}
+        \${step.detail ? \`<span style="color:var(--muted)"> — \${escHtml(step.detail)}</span>\` : ''}
+        \${active ? '<span style="color:var(--accent);font-size:.72rem"> ▶ current</span>' : ''}
+      </div>
+    </div>\`;
+  });
+  dh += '</div>';
+
+  if ((t.memory||[]).length) {
+    dh += '<h3 style="margin-top:12px">Agent Memory</h3><div class="scroll-list" style="max-height:120px">';
+    t.memory.forEach(m => { dh += \`<div class="pill" style="font-size:.75rem">\${escHtml(m)}</div>\`; });
+    dh += '</div>';
+  }
+  detail.innerHTML = dh;
+};
+if ((state.tasks||[]).length) showTaskDetail(0);
+</script>`;
+
+  return h;
+}
+
+// ─── Agents panel ─────────────────────────────────────────────────────────────
+function renderAgents() {
+  const agents = state.agents || [];
+  const busy = agents.filter(a => a.busy).length;
+  const stuck = agents.filter(a => a.health === 'stuck').length;
+  let h = `<div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+    <span class="pill ok">${agents.length} loaded</span>
+    <span class="pill ${busy ? 'warn' : ''}">${busy} busy</span>
+    ${stuck ? `<span class="pill err">${stuck} stuck</span>` : ''}
+    <span style="color:var(--muted);font-size:.78rem">Full swarm: ${state.summary.agents} agents</span>
+    <button class="btn sm danger" style="margin-left:auto" onclick="killAgents()">🛑 Kill all</button>
+    <button class="btn sm" onclick="refreshState()">↻ Refresh</button>
+  </div>`;
+
+  // Role summary
+  const roleCounts = {};
+  agents.forEach(a => { roleCounts[a.role] = (roleCounts[a.role]||0) + 1; });
+  h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">';
+  Object.entries(roleCounts).forEach(([role, count]) => {
+    h += `<span class="pill">${escHtml(role)} <strong>${count}</strong></span>`;
+  });
+  h += '</div>';
+
+  h += '<div class="agent-grid">';
+  agents.forEach(a => {
+    const cls = a.health === 'stuck' ? 'stuck' : a.health === 'degraded' ? 'degraded' : a.busy ? 'busy' : '';
+    h += `<div class="agent-card ${cls}">
+      <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8rem">${escHtml(a.id)}</div>
+      <div style="color:var(--muted);font-size:.72rem">${escHtml(a.role)}</div>
+      <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">
+        <span class="tag ${a.busy ? 'tag-running' : 'tag-done'}">${a.busy ? 'busy' : 'free'}</span>
+        <span style="font-size:.68rem;color:var(--muted)">${Math.round(a.reliability*100)}%</span>
+      </div>
+      ${a.task_id ? `<div style="font-size:.68rem;color:var(--accent);margin-top:2px">${escHtml(a.task_id)}</div>` : ''}
+    </div>`;
+  });
+  h += '</div>';
+  return h;
+}
+
+// ─── Computer panel ───────────────────────────────────────────────────────────
+function renderComputer() {
+  const log = state.computer_log || [];
+  let h = `<div style="display:flex;gap:8px;margin-bottom:12px">
+    <button class="btn sm" onclick="undoComputer()">↩ Undo last</button>
+    <button class="btn sm" onclick="refreshState()">↻ Refresh</button>
+  </div>`;
+
+  h += '<div class="card"><h3>Action Timeline</h3>';
+  h += '<div class="scroll-list" style="max-height:400px">';
+  if (!log.length) h += '<div class="empty"><div class="empty-icon">🖥</div>No computer actions yet</div>';
+  [...log].reverse().forEach((a, i) => {
+    const cls = a.undone ? 'tl-dot' : 'tl-dot done';
+    h += `<div class="tl-item" style="${a.undone ? 'opacity:.4' : ''}">
+      <div class="${cls}"></div>
+      <div style="font-size:.8rem">
+        <span style="color:var(--muted);font-size:.7rem">#${log.length - i} · ${escHtml(a.surface)}</span>
+        <strong style="margin-left:4px">${escHtml(a.agent_id)}</strong>
+        <span class="pill" style="font-size:.7rem;margin:0 4px">${escHtml(a.verb)}</span>
+        ${escHtml(a.target)}
+        ${a.detail ? `<span style="color:var(--muted)"> — ${escHtml(a.detail)}</span>` : ''}
+        ${a.undone ? '<span style="color:var(--danger);font-size:.7rem"> [undone]</span>' : ''}
+      </div>
+    </div>`;
+  });
+  h += '</div></div>';
+
+  // Browser nav form
+  h += `<div class="card" style="margin-top:12px">
+    <h3>Browser Navigation</h3>
+    <div style="display:flex;gap:8px">
+      <input class="input" id="browser-url" placeholder="https://..." style="flex:1">
+      <input class="input" id="browser-title" placeholder="Page title" style="max-width:180px">
+      <button class="btn primary" onclick="navigateBrowser()">Navigate</button>
+    </div>
+  </div>`;
+
+  // Terminal form
+  h += `<div class="card" style="margin-top:12px">
+    <h3>Terminal</h3>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <input class="input" id="term-cmd" placeholder="Command..." style="flex:1" onkeydown="if(event.key==='Enter')runCmd()">
+      <input class="input" id="term-out" placeholder="Output..." style="flex:1">
+      <button class="btn primary" onclick="runCmd()">Run</button>
+    </div>
+  </div>`;
+
+  return h;
+}
+
+// ─── Files panel ──────────────────────────────────────────────────────────────
+async function renderFilesAsync() {
+  const data = await api('GET', '/api/files');
+  if (!data) return;
+  const content = document.getElementById('content');
+  let h = `<div style="display:flex;gap:8px;margin-bottom:12px">
+    <input class="input" id="file-search" placeholder="Search files..." style="max-width:220px" oninput="liveSearchFiles()">
+    <button class="btn" onclick="renderFilesAsync()">↻ Refresh</button>
+  </div>
+  <div class="card">
+  <table class="table">
+  <thead><tr><th>Name</th><th>Size</th><th>Versions</th><th>Scope</th></tr></thead>
+  <tbody id="file-tbody">`;
+  data.forEach(f => {
+    h += `<tr>
+      <td><code style="font-size:.8rem">${escHtml(f.name)}</code></td>
+      <td style="color:var(--muted)">${f.size} B</td>
+      <td style="color:var(--muted)">${f.version_count}</td>
+      <td style="color:var(--muted)">${escHtml(f.project_scope||'—')}</td>
+    </tr>`;
+  });
+  if (!data.length) h += '<tr><td colspan="4"><div class="empty">No files</div></td></tr>';
+  h += '</tbody></table></div>';
+  content.innerHTML = h;
+}
+function renderFiles() { setTimeout(renderFilesAsync, 0); return '<div class="empty">Loading files...</div>'; }
+window.liveSearchFiles = async function() {
+  const q = document.getElementById('file-search').value;
+  if (!q) { renderFilesAsync(); return; }
+  const data = await api('GET', '/api/files', {q});
+  if (!data) return;
+  const tbody = document.getElementById('file-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = data.map(f => `<tr><td><code>${escHtml(f.name)}</code></td><td>${f.size} B</td></tr>`).join('');
+};
+
+// ─── Projects panel ───────────────────────────────────────────────────────────
+async function renderProjectsAsync() {
+  const data = await api('GET', '/api/projects');
+  if (!data) return;
+  let h = '<div class="scroll-list">';
+  data.forEach(p => {
+    const ok = p.last_exit_code === 0;
+    const ran = p.last_exit_code >= 0;
+    h += `<div class="card">
+      <div style="display:flex;align-items:center;gap:8px">
+        <strong>${escHtml(p.name)}</strong>
+        ${p.template_kind ? `<span class="pill">${escHtml(p.template_kind)}</span>` : ''}
+        ${ran ? `<span class="pill ${ok ? 'ok' : 'err'}">exit ${p.last_exit_code}</span>` : ''}
+        <span style="color:var(--muted);font-size:.75rem">${p.run_count} runs</span>
+        ${p.executable ? `<button class="btn sm primary" style="margin-left:auto" onclick="runProject('${escHtml(p.id)}')">▶ Run</button>` : ''}
+      </div>
+      <code style="display:block;font-size:.76rem;color:var(--muted);margin-top:6px">$ ${escHtml(p.command)}</code>
+    </div>`;
+  });
+  if (!data.length) h += '<div class="empty"><div class="empty-icon">🚀</div>No projects</div>';
+  h += '</div>';
+  const content = document.getElementById('content');
+  content.innerHTML = h;
+}
+function renderProjects() { setTimeout(renderProjectsAsync, 0); return '<div class="empty">Loading...</div>'; }
+
+// ─── Memory panel ─────────────────────────────────────────────────────────────
+async function renderMemoryAsync() {
+  const data = await api('GET', '/api/memory');
+  if (!data) return;
+  let h = `<div style="display:flex;gap:8px;margin-bottom:12px">
+    <input class="input" id="mem-search" placeholder="Search memory..." style="max-width:240px" oninput="searchMemory()">
+    <div style="margin-left:auto;display:flex;gap:8px">
+      <button class="btn sm" onclick="summarizeMemory()">Summarize old</button>
+    </div>
+  </div>
+  <div class="card"><h3>Memory Store (${data.length})</h3>
+  <div class="scroll-list" id="mem-list">`;
+  data.forEach(m => {
+    h += `<div class="pill" style="flex-direction:column;align-items:flex-start;padding:8px">
+      <span class="tag tag-queued" style="margin-bottom:4px">${escHtml(m.kind)}</span>
+      <span style="font-size:.8rem">${escHtml(m.content)}</span>
+      ${m.summarized ? '<span style="font-size:.7rem;color:var(--warn)">[summarized]</span>' : ''}
+    </div>`;
+  });
+  if (!data.length) h += '<div class="empty">No memory entries</div>';
+  h += '</div></div>';
+  document.getElementById('content').innerHTML = h;
+}
+function renderMemory() { setTimeout(renderMemoryAsync, 0); return '<div class="empty">Loading...</div>'; }
+window.searchMemory = async function() {
+  const q = document.getElementById('mem-search').value;
+  if (!q) { renderMemoryAsync(); return; }
+  const data = await api('GET', '/api/memory', {q});
+  if (!data) return;
+  const list = document.getElementById('mem-list');
+  if (list) list.innerHTML = data.map(m => `<div class="pill" style="font-size:.8rem">${escHtml(m.content)}</div>`).join('');
+};
+
+// ─── Knowledge panel ──────────────────────────────────────────────────────────
+async function renderKnowledgeAsync() {
+  const data = await api('GET', '/api/knowledge');
+  if (!data) return;
+  let h = `<div style="display:flex;gap:8px;margin-bottom:12px">
+    <input class="input" placeholder="Search knowledge..." style="max-width:240px" oninput="searchKB(this.value)">
+    <button class="btn primary" onclick="addKnowledge()">+ Add</button>
+  </div>
+  <div class="card">
+  <div class="scroll-list" id="kb-list">`;
+  data.forEach(k => {
+    h += `<div style="padding:10px;background:var(--surface2);border-radius:8px">
+      <div style="font-weight:600">${escHtml(k.title)}</div>
+      <div style="font-size:.78rem;color:var(--muted);margin-top:3px">${escHtml(k.body)}</div>
+    </div>`;
+  });
+  if (!data.length) h += '<div class="empty"><div class="empty-icon">📚</div>No knowledge entries</div>';
+  h += '</div></div>';
+  document.getElementById('content').innerHTML = h;
+}
+function renderKnowledge() { setTimeout(renderKnowledgeAsync, 0); return '<div class="empty">Loading...</div>'; }
+window.searchKB = async function(q) {
+  if (!q) { renderKnowledgeAsync(); return; }
+  const data = await api('GET', '/api/knowledge', {q});
+  const list = document.getElementById('kb-list');
+  if (list && data) list.innerHTML = data.map(k => `<div style="padding:8px;background:var(--surface2);border-radius:8px"><strong>${escHtml(k.title)}</strong><p>${escHtml(k.body)}</p></div>`).join('');
+};
+
+// ─── Audit panel ──────────────────────────────────────────────────────────────
+async function renderAuditAsync() {
+  const data = await api('GET', '/api/audit');
+  if (!data) return;
+  let h = `<div class="card"><h3>Audit Log (${data.length} events)</h3>
+  <div class="scroll-list" style="max-height:500px">`;
+  [...data].reverse().forEach(e => {
+    h += `<div style="display:flex;gap:8px;padding:6px;font-size:.8rem;border-bottom:1px solid var(--border)">
+      <span style="color:var(--muted);min-width:80px">${escHtml(e.actor)}</span>
+      <strong>${escHtml(e.action)}</strong>
+      <span style="color:var(--muted)">${escHtml(e.detail)}</span>
+    </div>`;
+  });
+  if (!data.length) h += '<div class="empty">No audit events</div>';
+  h += '</div></div>';
+  document.getElementById('content').innerHTML = h;
+}
+function renderAudit() { setTimeout(renderAuditAsync, 0); return '<div class="empty">Loading...</div>'; }
+
+// ─── Settings panel ───────────────────────────────────────────────────────────
+function renderSettings() {
+  const s = state.summary;
+  return `<div class="card"><h3>Session</h3>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" onclick="pauseSession()">⏸ Pause session</button>
+      <button class="btn success" onclick="resumeSession()">▶ Resume session</button>
+      <button class="btn" onclick="saveState()">💾 Save</button>
+    </div>
+  </div>
+  <div class="card" style="margin-top:12px"><h3>Agent Control</h3>
+    <div style="display:flex;gap:8px">
+      <button class="btn danger" onclick="killAgents()">🛑 Kill all agents</button>
+    </div>
+  </div>
+  <div class="card" style="margin-top:12px"><h3>Status</h3>
+    <div style="font-size:.84rem;display:flex;flex-direction:column;gap:6px">
+      <div>User: <strong>${escHtml(s.active_user)}</strong></div>
+      <div>Platform: <strong>${escHtml(s.platform)}</strong></div>
+      <div>Session: <strong>${escHtml(s.session_stage)}</strong></div>
+      <div>Local only: <strong>${s.local_only ? 'yes' : 'no'}</strong></div>
+    </div>
+  </div>`;
+}
+
+// ─── Actions ─────────────────────────────────────────────────────────────────
+async function tickTask(id) {
+  const r = await api('POST', `/api/tasks/${id}/tick`);
+  if (r?.ok) { toast('Task ticked'); await refreshState(); renderPanel(currentPanel); }
+  else toast('Tick failed', 'err');
+}
+async function cancelTask(id) {
+  if (!confirm('Cancel this task?')) return;
+  const r = await api('POST', `/api/tasks/${id}/cancel`);
+  if (r?.ok) { toast('Task cancelled'); await refreshState(); renderPanel(currentPanel); }
+  else toast('Cancel failed', 'err');
+}
+async function pauseTask(id) {
+  const r = await api('POST', `/api/tasks/${id}/pause`);
+  if (r?.ok) { toast('Task paused'); await refreshState(); renderPanel(currentPanel); }
+  else toast('Pause failed', 'err');
+}
+async function resumeTask(id) {
+  const r = await api('POST', `/api/tasks/${id}/resume`);
+  if (r?.ok) { toast('Task resumed'); await refreshState(); renderPanel(currentPanel); }
+  else toast('Resume failed', 'err');
+}
+async function reopenTask(id) {
+  const r = await api('POST', `/api/tasks/${id}/reopen`);
+  if (r?.ok) { toast('Task reopened'); await refreshState(); renderPanel(currentPanel); }
+  else toast('Reopen failed', 'err');
+}
+async function validateTask(id) {
+  const r = await api('POST', `/api/tasks/${id}/validate`);
+  if (r?.ok) { toast('Task validated ✓'); await refreshState(); renderPanel(currentPanel); }
+  else toast('Validate failed', 'err');
+}
+async function killAgents() {
+  if (!confirm('Kill all agents?')) return;
+  const r = await api('POST', '/api/agents/kill');
+  if (r?.ok) { toast('All agents killed', 'err'); await refreshState(); renderPanel(currentPanel); }
+}
+async function navigateBrowser() {
+  const url = document.getElementById('browser-url').value;
+  const title = document.getElementById('browser-title').value || url;
+  if (!url) { toast('URL required', 'err'); return; }
+  const r = await api('POST', '/api/computer/browser', {url, title});
+  if (r?.ok) { toast('Browser navigated'); await refreshState(); }
+  else toast('Failed', 'err');
+}
+async function runCmd() {
+  const command = document.getElementById('term-cmd').value;
+  const output = document.getElementById('term-out').value;
+  if (!command) { toast('Command required', 'err'); return; }
+  const r = await api('POST', '/api/computer/terminal', {command, output, exit_code: '0'});
+  if (r?.ok) { toast('Command recorded'); document.getElementById('term-cmd').value = ''; document.getElementById('term-out').value = ''; }
+  else toast('Failed', 'err');
+}
+async function undoComputer() {
+  const r = await api('POST', '/api/computer/undo');
+  if (r?.ok) { toast('Last action undone'); await refreshState(); renderPanel(currentPanel); }
+  else toast('Nothing to undo', 'err');
+}
+async function runProject(id) {
+  const r = await api('POST', `/api/projects/${id}/run`);
+  if (r?.ok) { toast('Project run complete ✓'); renderProjectsAsync(); }
+  else toast('Run failed', 'err');
+}
+async function pauseSession() {
+  const r = await api('POST', '/api/session/pause');
+  if (r?.ok) { toast('Session paused'); await refreshState(); }
+}
+async function resumeSession() {
+  const r = await api('POST', '/api/session/resume');
+  if (r?.ok) { toast('Session resumed ▶'); await refreshState(); }
+}
+async function saveState() {
+  const r = await api('POST', '/api/save');
+  if (r?.ok) toast('State saved 💾');
+  else toast('Save failed', 'err');
+}
+async function summarizeMemory() {
+  const r = await api('POST', '/api/memory/summarize');
+  if (r?.ok) { toast('Memories summarized'); renderMemoryAsync(); }
+}
+async function addKnowledge() {
+  const title = prompt('Knowledge title:');
+  if (!title) return;
+  const body = prompt('Body:') || '';
+  const r = await api('POST', '/api/knowledge', {title, body});
+  if (r?.ok) { toast('Knowledge added ✓'); renderKnowledgeAsync(); }
+  else toast('Failed', 'err');
+}
+
+// ─── New Task modal ───────────────────────────────────────────────────────────
+window.openNewTask = function() {
+  document.getElementById('modal-new-task').classList.add('open');
+  document.getElementById('nt-title').focus();
+};
+window.closeNewTask = function() {
+  document.getElementById('modal-new-task').classList.remove('open');
+};
+window.submitNewTask = async function() {
+  const title = document.getElementById('nt-title').value.trim();
+  if (!title) { toast('Title required', 'err'); return; }
+  const desc = document.getElementById('nt-desc').value;
+  const kind = document.getElementById('nt-kind').value;
+  const priority = document.getElementById('nt-priority').value;
+  const r = await api('POST', '/api/tasks', {title, description: desc, kind, priority});
+  if (r?.ok) {
+    toast('Task created ✓');
+    closeNewTask();
+    await refreshState();
+    nav(document.querySelector('.nav-item[onclick*="tasks"]'), 'tasks');
+  } else toast('Failed to create task', 'err');
+};
+document.getElementById('modal-new-task').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeNewTask();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeNewTask(); });
+
+// ─── Navigate to task detail ──────────────────────────────────────────────────
+window.navToTask = function(id) {
+  const idx = (state.tasks||[]).findIndex(t => t.id === id);
+  nav(document.querySelector('.nav-item[onclick*="tasks"]'), 'tasks');
+  setTimeout(() => { if (window.showTaskDetail) showTaskDetail(idx >= 0 ? idx : 0); }, 50);
+};
+
+// ─── Command palette ─────────────────────────────────────────────────────────
+const COMMANDS = [
+  {cat:'task',   label:'Create new task',         fn: () => openNewTask()},
+  {cat:'task',   label:'Tick all tasks',           fn: async () => { const r = await api('POST','/api/tasks/__tick'); toast('Ticked'); await refreshState(); }},
+  {cat:'agent',  label:'Kill all agents',          fn: () => killAgents()},
+  {cat:'session',label:'Pause session',            fn: () => pauseSession()},
+  {cat:'session',label:'Resume session',           fn: () => resumeSession()},
+  {cat:'data',   label:'Save state',               fn: () => saveState()},
+  {cat:'data',   label:'Summarize old memory',     fn: () => summarizeMemory()},
+  {cat:'nav',    label:'Go to Overview',           fn: () => nav(document.querySelectorAll('.nav-item')[0], 'overview')},
+  {cat:'nav',    label:'Go to Tasks',              fn: () => nav(document.querySelectorAll('.nav-item')[1], 'tasks')},
+  {cat:'nav',    label:'Go to Agents',             fn: () => nav(document.querySelectorAll('.nav-item')[2], 'agents')},
+  {cat:'nav',    label:'Go to Computer',           fn: () => nav(document.querySelectorAll('.nav-item')[3], 'computer')},
+  {cat:'nav',    label:'Go to Files',              fn: () => nav(document.querySelectorAll('.nav-item')[4], 'files')},
+  {cat:'nav',    label:'Go to Projects',           fn: () => nav(document.querySelectorAll('.nav-item')[5], 'projects')},
+  {cat:'nav',    label:'Go to Memory',             fn: () => nav(document.querySelectorAll('.nav-item')[6], 'memory')},
+  {cat:'nav',    label:'Go to Knowledge',          fn: () => nav(document.querySelectorAll('.nav-item')[7], 'knowledge')},
+  {cat:'nav',    label:'Go to Audit',              fn: () => nav(document.querySelectorAll('.nav-item')[8], 'audit')},
+];
+let paletteSel = 0;
+let paletteFiltered = [...COMMANDS];
+
+window.openPalette = function() {
+  document.getElementById('palette').classList.add('open');
+  document.getElementById('palette-input').value = '';
+  paletteSel = 0;
+  paletteFiltered = [...COMMANDS];
+  renderPaletteList();
+  document.getElementById('palette-input').focus();
+};
+function closePalette() { document.getElementById('palette').classList.remove('open'); }
+function renderPaletteList() {
+  const list = document.getElementById('palette-list');
+  list.innerHTML = paletteFiltered.map((c,i) =>
+    `<div class="palette-item ${i===paletteSel?'sel':''}" onclick="runPaletteItem(${i})">
+      <span class="palette-item-cat">${escHtml(c.cat)}</span>
+      <span>${escHtml(c.label)}</span>
+    </div>`
+  ).join('');
+}
+window.runPaletteItem = function(i) {
+  closePalette();
+  paletteFiltered[i]?.fn();
+};
+document.getElementById('palette-input').addEventListener('input', e => {
+  const q = e.target.value.toLowerCase();
+  paletteSel = 0;
+  paletteFiltered = COMMANDS.filter(c => c.label.toLowerCase().includes(q) || c.cat.includes(q));
+  renderPaletteList();
+});
+document.getElementById('palette-input').addEventListener('keydown', e => {
+  if (e.key === 'ArrowDown') { paletteSel = Math.min(paletteSel+1, paletteFiltered.length-1); renderPaletteList(); }
+  if (e.key === 'ArrowUp')   { paletteSel = Math.max(paletteSel-1, 0); renderPaletteList(); }
+  if (e.key === 'Enter')     { runPaletteItem(paletteSel); }
+  if (e.key === 'Escape')    { closePalette(); }
+});
+document.getElementById('palette').addEventListener('click', e => {
+  if (e.target === document.getElementById('palette')) closePalette();
+});
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey||e.metaKey) && e.key === 'k') { e.preventDefault(); openPalette(); }
+});
+
+// ─── Auto-refresh every 8s ───────────────────────────────────────────────────
+setInterval(() => { refreshState().then(() => renderPanel(currentPanel)); }, 8000);
+
+// ─── Boot ────────────────────────────────────────────────────────────────────
+connectSSE();
+renderPanel('overview');
+</script>)JS";
+
+    out << "</body></html>";
     return out.str();
 }
 
+// ─── Status page (simple, for health checks) ──────────────────────────────────
 std::string render_status_html(const App& app) {
     const auto s = app.summary();
     std::ostringstream out;
     out << "<!doctype html><html lang='en'><body><pre style='font-family:monospace;padding:20px'>"
-        << "LUO COMPUTER STATUS\n"
-        << "===================\n"
-        << "active_user=" << s.active_user << "\n"
-        << "session_stage=" << s.session_stage << "\n"
-        << "platform=" << s.platform << "\n"
-        << "local_only=" << (s.local_only_mode ? "true" : "false") << "\n"
+        << "LUO COMPUTER STATUS\n===================\n"
+        << "active_user="    << s.active_user    << "\n"
+        << "session_stage="  << s.session_stage  << "\n"
+        << "platform="       << s.platform       << "\n"
+        << "local_only="     << (s.local_only_mode ? "true" : "false") << "\n"
         << "---\n"
-        << "users=" << s.user_count << "\n"
-        << "agents=" << s.agent_count << "\n"
-        << "tasks=" << s.task_count << "\n"
+        << "users="     << s.user_count     << "\n"
+        << "agents="    << s.agent_count    << "\n"
+        << "tasks="     << s.task_count     << "\n"
         << "computers=" << s.computer_count << "\n"
-        << "files=" << s.file_count << "\n"
-        << "skills=" << s.skill_count << "\n"
-        << "projects=" << s.project_count << "\n"
-        << "devices=" << s.device_count << "\n"
-        << "memory=" << s.memory_count << "\n"
-        << "knowledge=" << s.knowledge_count << "\n"
-        << "audit=" << s.audit_count << "\n"
+        << "files="     << s.file_count     << "\n"
+        << "projects="  << s.project_count  << "\n"
+        << "memory="    << s.memory_count   << "\n"
+        << "knowledge=" << s.knowledge_count<< "\n"
+        << "audit="     << s.audit_count    << "\n"
         << "</pre></body></html>";
     return out.str();
 }

@@ -671,6 +671,40 @@ void App::ensure_workspace_seeded() {
         if (ws.agents.empty()) seed_swarm(ws);
         if (ws.computers.empty()) ws.computers.push_back(ComputerRecord{default_computer_id(), "Local Computer", operating_system_name(), {"computer", "terminal", "browser", "files"}, true});
         if (ws.active_computer_id.empty()) ws.active_computer_id = ws.computers.front().id;
+        // Seed luo_os built-in projects if none exist
+        if (ws.projects.empty()) seed_luo_os_projects(ws);
+    }
+}
+
+void App::seed_luo_os_projects(Workspace& ws) {
+    // Find the luo_os directory relative to the executable / data root
+    const auto luo_os_dir = data_root().parent_path() / "luo_os";
+    const auto bridge     = luo_os_dir / "bridge.py";
+    const auto server     = luo_os_dir / "luo_server.py";
+    const auto cli        = luo_os_dir / "luo_cli.py";
+    const auto kairos     = luo_os_dir / "ai_core" / "kairos.py";
+
+    struct Proj { std::string id, name, cmd, kind; };
+    const std::vector<Proj> projs = {
+        {"luo_os_status",  "Luo OS — Status",          "python3 " + bridge.string()  + " status",        "luo_os"},
+        {"luo_os_server",  "Luo OS — Start Server",    "python3 " + server.string()  + " &",             "luo_os"},
+        {"luo_os_cli",     "Luo OS — CLI",             "python3 " + cli.string(),                        "luo_os"},
+        {"luo_os_kairos",  "Luo OS — KAIROS Daemon",   "python3 " + kairos.string() + " start",         "luo_os"},
+        {"luo_os_mem",     "Luo OS — Memory Stats",    "python3 " + bridge.string()  + " memory stats",  "luo_os"},
+        {"luo_os_agents",  "Luo OS — List Agents",     "python3 " + bridge.string()  + " agents list",   "luo_os"},
+        {"luo_os_skills",  "Luo OS — Skill Library",   "python3 " + bridge.string()  + " skills list",   "luo_os"},
+    };
+
+    for (const auto& p : projs) {
+        ProjectRecord rec;
+        rec.id            = p.id;
+        rec.name          = p.name;
+        rec.command       = p.cmd;
+        rec.cwd           = luo_os_dir.string();
+        rec.executable    = std::filesystem::exists(bridge);
+        rec.template_kind = p.kind;
+        rec.last_exit_code = -1;
+        ws.projects.push_back(std::move(rec));
     }
 }
 
