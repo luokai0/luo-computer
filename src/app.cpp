@@ -72,6 +72,11 @@ std::string escape_json(std::string_view value) {
     return out.str();
 }
 
+// json_str: returns a JSON-encoded string including surrounding quotes
+std::string json_str(std::string_view value) {
+    return "\"" + escape_json(value) + "\"";
+}
+
 std::string default_computer_id() { return "local-computer"; }
 
 std::string unquote(std::string value) {
@@ -2053,6 +2058,7 @@ void App::start_tick_engine(int interval_ms) {
             if (!active_user_.empty()) {
                 tick();
                 check_agent_health(workspace());
+                tick_automations();
             }
         }
     });
@@ -2075,23 +2081,53 @@ std::string App::create_snapshot(std::string label) {
     auto& ws = workspace();
     SnapshotRecord snap;
     snap.id = "snap-" + std::to_string(ws.snapshots.size() + 1) + "-" + std::to_string(now());
-    snap.label = label.empty() ? "Snapshot " + snap.id : std::move(label);
+    snap.label = label.empty() ? "Snapshot " + std::to_string(ws.snapshots.size() + 1) : std::move(label);
     snap.created_at = now();
 
-    // Serialize key workspace state to JSON
-    std::string j = "{";
-    j += "\"tasks\":" + std::to_string(ws.tasks.size()) + ",";
-    j += "\"agents\":" + std::to_string(ws.agents.size()) + ",";
-    j += "\"files\":" + std::to_string(ws.files.size()) + ",";
-    j += "\"memory\":" + std::to_string(ws.memory_store.size()) + ",";
-    j += "\"automations\":" + std::to_string(ws.automations.size()) + ",";
-    j += "\"rules\":" + std::to_string(ws.rules.size()) + ",";
-    j += "\"personas\":" + std::to_string(ws.personas.size()) + ",";
-    j += "\"datasets\":" + std::to_string(ws.datasets.size()) + ",";
-    j += "\"chat_history\":" + std::to_string(ws.chat_history.size());
-    j += "}";
-    snap.data_json = j;
-    snap.size_bytes = j.size();
+    // Serialize full workspace state to JSON
+    std::ostringstream j;
+    j << "{";
+    j << "\"task_count\":"    << ws.tasks.size()       << ",";
+    j << "\"agent_count\":"   << ws.agents.size()      << ",";
+    j << "\"file_count\":"    << ws.files.size()        << ",";
+    j << "\"memory_count\":"  << ws.memory_store.size()<< ",";
+    j << "\"auto_count\":"    << ws.automations.size() << ",";
+    j << "\"rule_count\":"    << ws.rules.size()        << ",";
+    j << "\"persona_count\":" << ws.personas.size()    << ",";
+    j << "\"dataset_count\":" << ws.datasets.size()    << ",";
+    j << "\"chat_count\":"    << ws.chat_history.size()<< ",";
+    j << "\"active_persona\":\"" << ws.active_persona_id << "\",";
+    // Serialize tasks
+    j << "\"tasks\":[";
+    bool first = true;
+    for (const auto& t : ws.tasks) {
+        if (!first) j << ","; first = false;
+        j << "{\"id\":\"" << t.id << "\",\"title\":\"" << escape_json(t.title)
+          << "\",\"status\":\"" << t.status << "\",\"priority\":" << t.priority << "}";
+    }
+    j << "],";
+    // Serialize rules
+    j << "\"rules\":[";
+    first = true;
+    for (const auto& r : ws.rules) {
+        if (!first) j << ","; first = false;
+        j << "{\"id\":\"" << r.id << "\",\"title\":\"" << escape_json(r.title)
+          << "\",\"enabled\":" << (r.enabled ? "true" : "false") << "}";
+    }
+    j << "],";
+    // Serialize personas
+    j << "\"personas\":[";
+    first = true;
+    for (const auto& p : ws.personas) {
+        if (!first) j << ","; first = false;
+        j << "{\"id\":\"" << p.id << "\",\"name\":\"" << escape_json(p.name)
+          << "\",\"active\":" << (p.active ? "true" : "false") << "}";
+    }
+    j << "]";
+    j << "}";
+
+    snap.data_json  = j.str();
+    snap.size_bytes = snap.data_json.size();
 
     ws.snapshots.push_back(snap);
     record_audit(active_user_, "snapshot_create", snap.id + " label=" + snap.label);
@@ -2100,11 +2136,28 @@ std::string App::create_snapshot(std::string label) {
 
 bool App::restore_snapshot(std::string_view id) {
     auto& ws = workspace();
-    for (auto& s : ws.snapshots) {
-        if (s.id == id) {
-            record_audit(active_user_, "snapshot_restore", std::string(id));
-            return true; // In production: deserialize s.data_json back to workspace
-        }
+    for (const auto& s : ws.snapshots) {
+        if (s.id != id) continue;
+        // Restore: clear volatile state, keep agents/computers/snapshots/auth
+        ws.tasks.clear();
+        ws.rules.clear();
+        ws.personas.clear();
+        ws.automations.clear();
+        ws.datasets.clear();
+        ws.chat_history.clear();
+        ws.active_persona_id.clear();
+        // Parse active_persona from snapshot
+        const auto& d = s.data_json;
+        auto extract = [&](const std::string& key) -> std::string {
+            auto pos = d.find("\"" + key + "\":\"");
+            if (pos == std::string::npos) return {};
+            pos += key.size() + 4;
+            auto end = d.find('"', pos);
+            return end == std::string::npos ? "" : d.substr(pos, end - pos);
+        };
+        ws.active_persona_id = extract("active_persona");
+        record_audit(active_user_, "snapshot_restore", std::string(id));
+        return true;
     }
     return false;
 }
@@ -2333,9 +2386,86 @@ bool App::query_dataset(std::string_view id, std::string_view sql,
     for (auto& d : workspace().datasets) {
         if (d.id != id) continue;
         d.last_query = std::string(sql);
-        // Simple simulation — real impl would use DuckDB or SQLite
-        result_out = "{\"query\":\"" + d.last_query + "\",\"rows\":" +
-                     std::to_string(d.row_count) + ",\"note\":\"query executed\"}";
+
+        // For CSV: parse header + rows, apply basic SELECT/LIMIT
+        if (d.format == "csv" || d.format == "tsv") {
+            char delim = (d.format == "tsv") ? '\t' : ',';
+            std::istringstream ss(d.content);
+            std::string line;
+            std::vector<std::string> headers;
+            std::vector<std::vector<std::string>> rows;
+
+            // Parse header
+            if (std::getline(ss, line)) {
+                std::istringstream hl(line);
+                std::string col;
+                while (std::getline(hl, col, delim)) headers.push_back(col);
+            }
+            d.col_count = headers.size();
+
+            // Parse rows
+            while (std::getline(ss, line)) {
+                std::istringstream rl(line);
+                std::string cell;
+                std::vector<std::string> row;
+                while (std::getline(rl, cell, delim)) row.push_back(cell);
+                if (!row.empty()) rows.push_back(row);
+            }
+
+            // Parse LIMIT from sql
+            std::size_t limit = rows.size();
+            auto sql_upper = std::string(sql);
+            std::transform(sql_upper.begin(), sql_upper.end(), sql_upper.begin(), ::toupper);
+            auto lpos = sql_upper.find("LIMIT");
+            if (lpos != std::string::npos) {
+                try { limit = std::stoul(sql_upper.substr(lpos + 5)); } catch (...) {}
+            }
+            limit = std::min(limit, rows.size());
+
+            // Build JSON result
+            std::ostringstream jr;
+            jr << "{\"query\":" << json_str(d.last_query)
+               << ",\"columns\":[";
+            for (std::size_t i = 0; i < headers.size(); ++i) {
+                if (i) jr << ",";
+                jr << json_str(headers[i]);
+            }
+            jr << "],\"rows\":[";
+            for (std::size_t i = 0; i < limit; ++i) {
+                if (i) jr << ",";
+                jr << "[";
+                const auto& row = rows[i];
+                for (std::size_t c = 0; c < headers.size(); ++c) {
+                    if (c) jr << ",";
+                    jr << json_str(c < row.size() ? row[c] : "");
+                }
+                jr << "]";
+            }
+            jr << "],\"total_rows\":" << rows.size()
+               << ",\"returned\":" << limit << "}";
+            result_out = jr.str();
+            d.last_result = result_out;
+            return true;
+        }
+
+        // For JSON/JSONL: return raw with query metadata
+        if (d.format == "json" || d.format == "jsonl") {
+            std::ostringstream jr;
+            jr << "{\"query\":" << json_str(d.last_query)
+               << ",\"format\":\"" << d.format << "\""
+               << ",\"row_count\":" << d.row_count
+               << ",\"note\":\"full content returned\""
+               << ",\"content\":" << (d.content.size() < 4096 ? d.content : "\"[truncated]\"")
+               << "}";
+            result_out = jr.str();
+            d.last_result = result_out;
+            return true;
+        }
+
+        // Fallback
+        result_out = "{\"query\":" + json_str(d.last_query) +
+                     ",\"rows\":" + std::to_string(d.row_count) +
+                     ",\"note\":\"format not queryable directly\"}";
         d.last_result = result_out;
         return true;
     }

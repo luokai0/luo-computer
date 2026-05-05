@@ -1057,11 +1057,28 @@ const COMMANDS = [
   {cat:'nav',    label:'Go to Tasks',              fn: () => nav(document.querySelectorAll('.nav-item')[1], 'tasks')},
   {cat:'nav',    label:'Go to Agents',             fn: () => nav(document.querySelectorAll('.nav-item')[2], 'agents')},
   {cat:'nav',    label:'Go to Computer',           fn: () => nav(document.querySelectorAll('.nav-item')[3], 'computer')},
-  {cat:'nav',    label:'Go to Files',              fn: () => nav(document.querySelectorAll('.nav-item')[4], 'files')},
-  {cat:'nav',    label:'Go to Projects',           fn: () => nav(document.querySelectorAll('.nav-item')[5], 'projects')},
-  {cat:'nav',    label:'Go to Memory',             fn: () => nav(document.querySelectorAll('.nav-item')[6], 'memory')},
-  {cat:'nav',    label:'Go to Knowledge',          fn: () => nav(document.querySelectorAll('.nav-item')[7], 'knowledge')},
-  {cat:'nav',    label:'Go to Audit',              fn: () => nav(document.querySelectorAll('.nav-item')[8], 'audit')},
+  {cat:'nav',    label:'Go to Chat',               fn: () => nav(document.querySelector('.nav-item[onclick*="chat"]'), 'chat')},
+  {cat:'nav',    label:'Go to Files',              fn: () => nav(document.querySelector('.nav-item[onclick*="files"]'), 'files')},
+  {cat:'nav',    label:'Go to Projects',           fn: () => nav(document.querySelector('.nav-item[onclick*="projects"]'), 'projects')},
+  {cat:'nav',    label:'Go to Datasets',           fn: () => nav(document.querySelector('.nav-item[onclick*="datasets"]'), 'datasets')},
+  {cat:'nav',    label:'Go to Memory',             fn: () => nav(document.querySelector('.nav-item[onclick*="memory"]'), 'memory')},
+  {cat:'nav',    label:'Go to Knowledge',          fn: () => nav(document.querySelector('.nav-item[onclick*="knowledge"]'), 'knowledge')},
+  {cat:'nav',    label:'Go to Automations',        fn: () => nav(document.querySelector('.nav-item[onclick*="automations"]'), 'automations')},
+  {cat:'nav',    label:'Go to Personas',           fn: () => nav(document.querySelector('.nav-item[onclick*="personas"]'), 'personas')},
+  {cat:'nav',    label:'Go to Rules',              fn: () => nav(document.querySelector('.nav-item[onclick*="rules"]'), 'rules')},
+  {cat:'nav',    label:'Go to Snapshots',          fn: () => nav(document.querySelector('.nav-item[onclick*="snapshots"]'), 'snapshots')},
+  {cat:'nav',    label:'Go to System Monitor',     fn: () => nav(document.querySelector('.nav-item[onclick*="system"]'), 'system')},
+  {cat:'nav',    label:'Go to Audit',              fn: () => nav(document.querySelector('.nav-item[onclick*="audit"]'), 'audit')},
+  {cat:'nav',    label:'Go to Settings',           fn: () => nav(document.querySelector('.nav-item[onclick*="settings"]'), 'settings')},
+  {cat:'action', label:'Create Snapshot',          fn: () => createSnapshot()},
+  {cat:'action', label:'New Automation',           fn: () => createAuto()},
+  {cat:'action', label:'New Persona',              fn: () => createPersona()},
+  {cat:'action', label:'New Rule',                 fn: () => createRule()},
+  {cat:'action', label:'Import Dataset',           fn: () => createDataset()},
+  {cat:'action', label:'Clear Chat History',       fn: async () => { if(confirm('Clear chat history?')) { await fetch('/api/chat/clear',{method:'POST'}); toast('Chat history cleared'); }}},
+  {cat:'luo_os', label:'luo_os Status',            fn: async () => { const r = await fetch('/api/luo_os/status').then(r=>r.json()).catch(()=>({})); toast(JSON.stringify(r).substring(0,80)); }},
+  {cat:'luo_os', label:'luo_os Skill Library',     fn: () => nav(document.querySelector('.nav-item[onclick*="knowledge"]'), 'knowledge')},
+  {cat:'luo_os', label:'KAIROS Status',            fn: async () => { const r = await fetch('/api/luo_os/kairos').then(r=>r.json()).catch(()=>({})); toast(JSON.stringify(r).substring(0,80)); }},
 ];
 let paletteSel = 0;
 let paletteFiltered = [...COMMANDS];
@@ -1368,9 +1385,33 @@ async function createDataset() {
   if(r.ok){toast('Dataset imported');renderPanel('datasets');}
 }
 async function queryDataset(id) {
-  const sql = prompt('SQL query:') || 'SELECT * FROM data LIMIT 10';
-  const r = await fetch(`/api/datasets/${id}/query`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sql})}).then(r=>r.json());
-  alert(JSON.stringify(r, null, 2));
+  const sql = prompt('SQL query (e.g. SELECT * FROM data LIMIT 10):') || 'SELECT * FROM data LIMIT 10';
+  const r = await fetch(`/api/datasets/${id}/query`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sql})}).then(r=>r.json()).catch(()=>({}));
+  if (r.error) { alert('Error: ' + r.error); return; }
+  // Build a readable table
+  let out = `<b>Query:</b> ${sql}<br><br>`;
+  if (r.columns && r.rows) {
+    out += '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:.8rem;width:100%">';
+    out += '<tr>' + r.columns.map(c => `<th style="padding:6px 10px;background:var(--surface2);border:1px solid var(--border);text-align:left">${c}</th>`).join('') + '</tr>';
+    r.rows.forEach(row => {
+      out += '<tr>' + row.map(v => `<td style="padding:5px 10px;border:1px solid var(--border)">${v}</td>`).join('') + '</tr>';
+    });
+    out += '</table></div>';
+    out += `<br><span style="color:var(--muted);font-size:.75rem">Showing ${r.returned} of ${r.total_rows} rows</span>`;
+  } else {
+    out += '<pre style="font-size:.75rem;overflow-x:auto">' + JSON.stringify(r, null, 2) + '</pre>';
+  }
+  // Show in a modal overlay
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;display:flex;align-items:center;justify-content:center';
+  overlay.innerHTML = `<div style="background:var(--surface);border-radius:12px;padding:24px;max-width:90vw;max-height:80vh;overflow:auto;min-width:400px">
+    <div style="display:flex;justify-content:space-between;margin-bottom:16px">
+      <h4 style="margin:0">Query Result</h4>
+      <button class="btn sm" onclick="this.closest('[style*=fixed]').remove()">✕</button>
+    </div>
+    ${out}
+  </div>`;
+  document.body.appendChild(overlay);
 }
 async function deleteDataset(id) {
   if(!confirm('Delete dataset?')) return;

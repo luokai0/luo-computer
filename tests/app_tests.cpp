@@ -693,7 +693,11 @@ int main() {
         std::string result;
         CHECK(app.query_dataset(id, "SELECT * FROM data LIMIT 2", result));
         CHECK(!result.empty());
-        CHECK(result.find("query") != std::string::npos);
+        CHECK(result.find("columns") != std::string::npos);
+        CHECK(result.find("Alice")   != std::string::npos);
+        CHECK(result.find("Bob")     != std::string::npos);
+        // LIMIT 2 should return only 2 data rows
+        CHECK(result.find("Carol") == std::string::npos);
         CHECK(!app.query_dataset("bad_id", "SELECT 1", result));
 
         CHECK(app.delete_dataset(id));

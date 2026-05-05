@@ -925,10 +925,17 @@ int run_server(App& app, int port) {
                     data = "data: " + [&app]() -> std::string {
                         const auto s = app.summary();
                         std::ostringstream o;
-                        o << "{\"agents\":" << s.agent_count
-                          << ",\"tasks\":"  << s.task_count
-                          << ",\"stage\":"  << '"' << s.session_stage << '"'
-                          << ",\"audit\":"  << s.audit_count << '}';
+                        o << "{\"agents\":"      << s.agent_count
+                          << ",\"tasks\":"        << s.task_count
+                          << ",\"stage\":\""      << s.session_stage << "\""
+                          << ",\"audit\":"        << s.audit_count
+                          << ",\"automations\":"  << app.automations().size()
+                          << ",\"personas\":"     << app.personas().size()
+                          << ",\"rules\":"        << app.rules().size()
+                          << ",\"datasets\":"     << app.datasets().size()
+                          << ",\"snapshots\":"    << app.snapshots().size()
+                          << ",\"chat\":"         << app.chat_history(1).size() // non-zero if any
+                          << "}";
                         return o.str();
                     }() + "\n\n";
                 }
