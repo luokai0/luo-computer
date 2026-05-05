@@ -530,6 +530,256 @@ int main() {
         CHECK(session_app.session_state().stage == SessionStage::Idle);
     }
 
+    // ── Zo-inspired: Snapshots ────────────────────────────────────────────────
+    section("Snapshots");
+    {
+        auto id1 = app.create_snapshot("before migration");
+        auto id2 = app.create_snapshot("after migration");
+        CHECK(!id1.empty());
+        CHECK(!id2.empty());
+        CHECK(id1 != id2);
+
+        auto snaps = app.snapshots();
+        CHECK(snaps.size() >= 2);
+        // Find our snapshots by label
+        bool found1 = false, found2 = false;
+        for (const auto& s : snaps) {
+            if (s.label == "before migration") { found1 = true; CHECK(s.created_at > 0); CHECK(!s.data_json.empty()); }
+            if (s.label == "after migration")  { found2 = true; }
+        }
+        CHECK(found1);
+        CHECK(found2);
+
+        CHECK(app.restore_snapshot(id1));
+        CHECK(!app.restore_snapshot("nonexistent_id"));
+
+        auto before_del = app.snapshots().size();
+        CHECK(app.delete_snapshot(id1));
+        CHECK(app.snapshots().size() == before_del - 1);
+        CHECK(!app.delete_snapshot("nonexistent_id"));
+        // cleanup
+        app.delete_snapshot(id2);
+    }
+
+    // ── Zo-inspired: Automations ──────────────────────────────────────────────
+    section("Automations");
+    {
+        auto id = app.create_automation(
+            "Daily digest", "Summarize today's tasks and memory",
+            "0 9 * * *", "dashboard");
+        CHECK(!id.empty());
+
+        auto autos = app.automations();
+        bool found = false;
+        for (const auto& a : autos) {
+            if (a.id == id) {
+                found = true;
+                CHECK(a.name == "Daily digest");
+                CHECK(a.schedule == "0 9 * * *");
+                CHECK(a.delivery == "dashboard");
+                CHECK(a.enabled);
+                CHECK(a.next_run > 0);
+            }
+        }
+        CHECK(found);
+
+        CHECK(app.toggle_automation(id, false));
+        for (const auto& a : app.automations()) if (a.id == id) CHECK(!a.enabled);
+        CHECK(app.toggle_automation(id, true));
+        for (const auto& a : app.automations()) if (a.id == id) CHECK(a.enabled);
+
+        app.run_automation_now(id);
+        for (const auto& a : app.automations()) if (a.id == id) {
+            CHECK(a.run_count == 1);
+            CHECK(a.last_ran > 0);
+        }
+
+        CHECK(app.delete_automation(id));
+        for (const auto& a : app.automations()) CHECK(a.id != id);
+    }
+
+    // ── Zo-inspired: Personas ─────────────────────────────────────────────────
+    section("Personas");
+    {
+        auto id1 = app.create_persona("Code Expert",
+            "You are a senior software engineer. Always write clean, tested code.",
+            "qwen2.5-7b", "technical");
+        auto id2 = app.create_persona("Writer",
+            "You are a creative writer. Be concise and vivid.",
+            "", "friendly");
+        CHECK(!id1.empty());
+        CHECK(!id2.empty());
+
+        bool found1 = false, found2 = false;
+        for (const auto& p : app.personas()) {
+            if (p.id == id1) { found1 = true; CHECK(p.name == "Code Expert"); CHECK(p.tone == "technical"); }
+            if (p.id == id2) { found2 = true; CHECK(p.name == "Writer"); }
+        }
+        CHECK(found1); CHECK(found2);
+
+        CHECK(app.activate_persona(id1));
+        for (const auto& p : app.personas()) {
+            if (p.id == id1) CHECK(p.active);
+            if (p.id == id2) CHECK(!p.active);
+        }
+        auto active = app.active_persona();
+        CHECK(active.id == id1);
+        CHECK(active.name == "Code Expert");
+
+        // Activating second deactivates first
+        CHECK(app.activate_persona(id2));
+        for (const auto& p : app.personas()) {
+            if (p.id == id1) CHECK(!p.active);
+            if (p.id == id2) CHECK(p.active);
+        }
+
+        auto before = app.personas().size();
+        CHECK(app.delete_persona(id1));
+        CHECK(app.personas().size() == before - 1);
+        CHECK(!app.delete_persona("bad_id"));
+        app.delete_persona(id2);
+    }
+
+    // ── Zo-inspired: Rules ────────────────────────────────────────────────────
+    section("Rules");
+    {
+        auto id1 = app.create_rule("TypeScript only",
+            "when coding", "Always use TypeScript, never plain JavaScript");
+        auto id2 = app.create_rule("Be concise",
+            "always", "Keep responses under 3 paragraphs");
+        CHECK(!id1.empty());
+        CHECK(!id2.empty());
+
+        bool found1 = false, found2 = false;
+        for (const auto& r : app.rules()) {
+            if (r.id == id1) { found1 = true; CHECK(r.title == "TypeScript only"); CHECK(r.enabled); }
+            if (r.id == id2) { found2 = true; CHECK(r.condition == "always"); }
+        }
+        CHECK(found1); CHECK(found2);
+
+        auto prompt = app.active_rules_prompt();
+        CHECK(prompt.find("TypeScript") != std::string::npos);
+        CHECK(prompt.find("3 paragraphs") != std::string::npos);
+
+        CHECK(app.toggle_rule(id1, false));
+        auto prompt2 = app.active_rules_prompt();
+        CHECK(prompt2.find("TypeScript") == std::string::npos);
+        CHECK(prompt2.find("3 paragraphs") != std::string::npos);
+
+        auto before = app.rules().size();
+        CHECK(app.delete_rule(id2));
+        CHECK(app.rules().size() == before - 1);
+        app.delete_rule(id1);
+    }
+
+    // ── Zo-inspired: Datasets ─────────────────────────────────────────────────
+    section("Datasets");
+    {
+        std::string csv = "name,age,city\nAlice,30,NYC\nBob,25,LA\nCarol,35,Chicago\n";
+        auto id = app.create_dataset("users", "csv", csv);
+        CHECK(!id.empty());
+
+        bool found = false;
+        for (const auto& d : app.datasets()) {
+            if (d.id == id) {
+                found = true;
+                CHECK(d.name == "users");
+                CHECK(d.format == "csv");
+                CHECK(d.row_count == 4);
+            }
+        }
+        CHECK(found);
+
+        std::string result;
+        CHECK(app.query_dataset(id, "SELECT * FROM data LIMIT 2", result));
+        CHECK(!result.empty());
+        CHECK(result.find("query") != std::string::npos);
+        CHECK(!app.query_dataset("bad_id", "SELECT 1", result));
+
+        CHECK(app.delete_dataset(id));
+        for (const auto& d : app.datasets()) CHECK(d.id != id);
+    }
+
+    // ── Zo-inspired: System stats ─────────────────────────────────────────────
+    section("System stats");
+    {
+        auto stats = app.system_stats();
+        CHECK(stats.sampled_at > 0);
+        CHECK(stats.mem_total_mb > 0);
+        CHECK(stats.disk_total_mb > 0);
+        CHECK(stats.uptime_secs > 0);
+        CHECK(stats.cpu_pct >= 0.0 && stats.cpu_pct <= 100.0);
+    }
+
+    // ── luo_os-inspired: Chat history ────────────────────────────────────────
+    section("Chat history");
+    {
+        app.clear_chat_history();
+        auto id1 = app.add_chat_message("user", "Hello luo_os!");
+        auto id2 = app.add_chat_message("assistant", "Hello! How can I help?", "qwen2.5-1.5b");
+        auto id3 = app.add_chat_message("user", "What can you do?");
+        CHECK(!id1.empty());
+        CHECK(!id2.empty());
+        CHECK(id1 != id2);
+
+        auto history = app.chat_history(100);
+        CHECK(history.size() == 3);
+        CHECK(history[0].role == "user");
+        CHECK(history[0].content == "Hello luo_os!");
+        CHECK(history[1].model == "qwen2.5-1.5b");
+
+        auto limited = app.chat_history(2);
+        CHECK(limited.size() == 2);
+        CHECK(limited[0].content == "Hello! How can I help?");
+
+        app.clear_chat_history();
+        CHECK(app.chat_history(100).empty());
+    }
+
+    // ── luo_os-inspired: Models ───────────────────────────────────────────────
+    section("Models");
+    {
+        auto models = app.available_models();
+        CHECK(models.size() >= 3);
+
+        bool has_active = false;
+        for (const auto& m : models) if (m.active) { has_active = true; break; }
+        CHECK(has_active);
+
+        CHECK(app.set_active_model("gpt-4o"));
+        bool gpt_active = false;
+        for (const auto& m : app.available_models())
+            if (m.id == "gpt-4o" && m.active) { gpt_active = true; break; }
+        CHECK(gpt_active);
+    }
+
+    // ── Dashboard HTML includes new panels ────────────────────────────────────
+    section("Dashboard HTML — new panels");
+    {
+        const auto html = render_dashboard_html(app);
+        CHECK(html.find("Automations")        != std::string::npos);
+        CHECK(html.find("Personas")           != std::string::npos);
+        CHECK(html.find("Rules")              != std::string::npos);
+        CHECK(html.find("Snapshots")          != std::string::npos);
+        CHECK(html.find("Datasets")           != std::string::npos);
+        CHECK(html.find("System")             != std::string::npos);
+        CHECK(html.find("Chat")               != std::string::npos);
+        CHECK(html.find("renderAutomations")  != std::string::npos);
+        CHECK(html.find("renderPersonas")     != std::string::npos);
+        CHECK(html.find("renderRules")        != std::string::npos);
+        CHECK(html.find("renderSnapshots")    != std::string::npos);
+        CHECK(html.find("renderDatasets")     != std::string::npos);
+        CHECK(html.find("renderSystem")       != std::string::npos);
+        CHECK(html.find("renderChat")         != std::string::npos);
+        CHECK(html.find("/api/automations")   != std::string::npos);
+        CHECK(html.find("/api/personas")      != std::string::npos);
+        CHECK(html.find("/api/rules")         != std::string::npos);
+        CHECK(html.find("/api/snapshots")     != std::string::npos);
+        CHECK(html.find("/api/datasets")      != std::string::npos);
+        CHECK(html.find("/api/system")        != std::string::npos);
+        CHECK(html.find("/api/luo_os/chat")   != std::string::npos);
+    }
+
     section("Logout");
     app.logout();
     CHECK(!app.authenticated());

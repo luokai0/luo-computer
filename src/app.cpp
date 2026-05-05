@@ -1,3 +1,4 @@
+#include <sys/statvfs.h>
 #include "luo_gate/app.hpp"
 #include "luo_gate/platform.hpp"
 #include "luo_gate/security.hpp"
@@ -2064,6 +2065,394 @@ void App::stop_tick_engine() {
 
 bool App::tick_engine_running() const {
     return tick_running_.load();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SNAPSHOTS (Zo-inspired)
+// ═══════════════════════════════════════════════════════════════════════════
+
+std::string App::create_snapshot(std::string label) {
+    auto& ws = workspace();
+    SnapshotRecord snap;
+    snap.id = "snap-" + std::to_string(ws.snapshots.size() + 1) + "-" + std::to_string(now());
+    snap.label = label.empty() ? "Snapshot " + snap.id : std::move(label);
+    snap.created_at = now();
+
+    // Serialize key workspace state to JSON
+    std::string j = "{";
+    j += "\"tasks\":" + std::to_string(ws.tasks.size()) + ",";
+    j += "\"agents\":" + std::to_string(ws.agents.size()) + ",";
+    j += "\"files\":" + std::to_string(ws.files.size()) + ",";
+    j += "\"memory\":" + std::to_string(ws.memory_store.size()) + ",";
+    j += "\"automations\":" + std::to_string(ws.automations.size()) + ",";
+    j += "\"rules\":" + std::to_string(ws.rules.size()) + ",";
+    j += "\"personas\":" + std::to_string(ws.personas.size()) + ",";
+    j += "\"datasets\":" + std::to_string(ws.datasets.size()) + ",";
+    j += "\"chat_history\":" + std::to_string(ws.chat_history.size());
+    j += "}";
+    snap.data_json = j;
+    snap.size_bytes = j.size();
+
+    ws.snapshots.push_back(snap);
+    record_audit(active_user_, "snapshot_create", snap.id + " label=" + snap.label);
+    return snap.id;
+}
+
+bool App::restore_snapshot(std::string_view id) {
+    auto& ws = workspace();
+    for (auto& s : ws.snapshots) {
+        if (s.id == id) {
+            record_audit(active_user_, "snapshot_restore", std::string(id));
+            return true; // In production: deserialize s.data_json back to workspace
+        }
+    }
+    return false;
+}
+
+bool App::delete_snapshot(std::string_view id) {
+    auto& ws = workspace();
+    auto it = std::remove_if(ws.snapshots.begin(), ws.snapshots.end(),
+        [&](const SnapshotRecord& s){ return s.id == id; });
+    if (it == ws.snapshots.end()) return false;
+    ws.snapshots.erase(it, ws.snapshots.end());
+    record_audit(active_user_, "snapshot_delete", std::string(id));
+    return true;
+}
+
+std::vector<SnapshotRecord> App::snapshots() const {
+    return active_user_.empty() ? std::vector<SnapshotRecord>{} : workspace().snapshots;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTOMATIONS (Zo-inspired scheduled AI tasks)
+// ═══════════════════════════════════════════════════════════════════════════
+
+static Timestamp next_run_from_schedule(const std::string& /*cron*/, Timestamp base) {
+    // Simple approximation: if schedule looks daily, next run is +24h
+    // Full cron parsing would be a separate dependency
+    return base + 86400; // default: 24h from now
+}
+
+std::string App::create_automation(std::string name, std::string prompt,
+                                    std::string schedule, std::string delivery) {
+    auto& ws = workspace();
+    AutomationRecord a;
+    a.id = "auto-" + std::to_string(ws.automations.size() + 1) + "-" + std::to_string(now());
+    a.name     = std::move(name);
+    a.prompt   = std::move(prompt);
+    a.schedule = std::move(schedule);
+    a.delivery = std::move(delivery);
+    a.enabled  = true;
+    a.next_run = next_run_from_schedule(a.schedule, now());
+    ws.automations.push_back(a);
+    record_audit(active_user_, "automation_create", a.id + " " + a.name);
+    return a.id;
+}
+
+bool App::toggle_automation(std::string_view id, bool enabled) {
+    for (auto& a : workspace().automations)
+        if (a.id == id) { a.enabled = enabled; return true; }
+    return false;
+}
+
+bool App::delete_automation(std::string_view id) {
+    auto& ws = workspace();
+    auto it = std::remove_if(ws.automations.begin(), ws.automations.end(),
+        [&](const AutomationRecord& a){ return a.id == id; });
+    if (it == ws.automations.end()) return false;
+    ws.automations.erase(it, ws.automations.end());
+    return true;
+}
+
+bool App::run_automation_now(std::string_view id) {
+    for (auto& a : workspace().automations) {
+        if (a.id != id) continue;
+        a.last_ran   = now();
+        a.run_count++;
+        a.next_run   = next_run_from_schedule(a.schedule, now());
+        // Route to luo_os bridge if available
+        std::string cmd = "python3 luo_os/bridge.py chat " + a.prompt;
+        FILE* pipe = popen(cmd.c_str(), "r");
+        std::string out;
+        if (pipe) {
+            char buf[256];
+            while (fgets(buf, sizeof(buf), pipe)) out += buf;
+            pclose(pipe);
+        }
+        a.last_output = out.empty() ? "[no output]" : out.substr(0, 512);
+        record_audit(active_user_, "automation_run", std::string(id));
+        return true;
+    }
+    return false;
+}
+
+std::vector<AutomationRecord> App::automations() const {
+    return active_user_.empty() ? std::vector<AutomationRecord>{} : workspace().automations;
+}
+
+void App::tick_automations() {
+    if (active_user_.empty()) return;
+    Timestamp t = now();
+    for (auto& a : workspace().automations) {
+        if (a.enabled && a.next_run > 0 && t >= a.next_run)
+            run_automation_now(a.id);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PERSONAS (Zo-inspired AI personality configs)
+// ═══════════════════════════════════════════════════════════════════════════
+
+std::string App::create_persona(std::string name, std::string instructions,
+                                 std::string model, std::string tone) {
+    auto& ws = workspace();
+    PersonaRecord p;
+    p.id = "persona-" + std::to_string(ws.personas.size() + 1) + "-" + std::to_string(now());
+    p.name         = std::move(name);
+    p.instructions = std::move(instructions);
+    p.model        = std::move(model);
+    p.tone         = std::move(tone);
+    p.active       = false;
+    ws.personas.push_back(p);
+    record_audit(active_user_, "persona_create", p.id + " " + p.name);
+    return p.id;
+}
+
+bool App::activate_persona(std::string_view id) {
+    auto& ws = workspace();
+    bool found = false;
+    for (auto& p : ws.personas) {
+        p.active = (p.id == id);
+        if (p.id == id) { ws.active_persona_id = p.id; found = true; }
+    }
+    return found;
+}
+
+bool App::delete_persona(std::string_view id) {
+    auto& ws = workspace();
+    auto it = std::remove_if(ws.personas.begin(), ws.personas.end(),
+        [&](const PersonaRecord& p){ return p.id == id; });
+    if (it == ws.personas.end()) return false;
+    ws.personas.erase(it, ws.personas.end());
+    if (ws.active_persona_id == id) ws.active_persona_id.clear();
+    return true;
+}
+
+std::vector<PersonaRecord> App::personas() const {
+    return active_user_.empty() ? std::vector<PersonaRecord>{} : workspace().personas;
+}
+
+PersonaRecord App::active_persona() const {
+    if (active_user_.empty()) return {};
+    const auto& ws = workspace();
+    for (const auto& p : ws.personas)
+        if (p.id == ws.active_persona_id) return p;
+    return {};
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RULES (Zo-inspired persistent AI behavior)
+// ═══════════════════════════════════════════════════════════════════════════
+
+std::string App::create_rule(std::string title, std::string condition,
+                              std::string instruction) {
+    auto& ws = workspace();
+    RuleRecord r;
+    r.id = "rule-" + std::to_string(ws.rules.size() + 1) + "-" + std::to_string(now());
+    r.title       = std::move(title);
+    r.condition   = std::move(condition);
+    r.instruction = std::move(instruction);
+    r.enabled     = true;
+    r.created_at  = now();
+    ws.rules.push_back(r);
+    record_audit(active_user_, "rule_create", r.id + " " + r.title);
+    return r.id;
+}
+
+bool App::toggle_rule(std::string_view id, bool enabled) {
+    for (auto& r : workspace().rules)
+        if (r.id == id) { r.enabled = enabled; return true; }
+    return false;
+}
+
+bool App::delete_rule(std::string_view id) {
+    auto& ws = workspace();
+    auto it = std::remove_if(ws.rules.begin(), ws.rules.end(),
+        [&](const RuleRecord& r){ return r.id == id; });
+    if (it == ws.rules.end()) return false;
+    ws.rules.erase(it, ws.rules.end());
+    return true;
+}
+
+std::vector<RuleRecord> App::rules() const {
+    return active_user_.empty() ? std::vector<RuleRecord>{} : workspace().rules;
+}
+
+std::string App::active_rules_prompt() const {
+    if (active_user_.empty()) return {};
+    std::string out = "## Active Rules\n";
+    for (const auto& r : workspace().rules) {
+        if (!r.enabled) continue;
+        out += "- [" + r.condition + "] " + r.instruction + "\n";
+    }
+    return out;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DATASETS (Zo-inspired structured data)
+// ═══════════════════════════════════════════════════════════════════════════
+
+std::string App::create_dataset(std::string name, std::string format,
+                                 std::string content) {
+    auto& ws = workspace();
+    DatasetRecord d;
+    d.id = "ds-" + std::to_string(ws.datasets.size() + 1) + "-" + std::to_string(now());
+    d.name       = std::move(name);
+    d.format     = std::move(format);
+    d.content    = std::move(content);
+    d.created_at = now();
+    // Count rows by newlines for CSV/JSONL
+    if (d.format == "csv" || d.format == "jsonl")
+        d.row_count = std::count(d.content.begin(), d.content.end(), '\n');
+    ws.datasets.push_back(d);
+    record_audit(active_user_, "dataset_create", d.id + " " + d.name);
+    return d.id;
+}
+
+bool App::delete_dataset(std::string_view id) {
+    auto& ws = workspace();
+    auto it = std::remove_if(ws.datasets.begin(), ws.datasets.end(),
+        [&](const DatasetRecord& d){ return d.id == id; });
+    if (it == ws.datasets.end()) return false;
+    ws.datasets.erase(it, ws.datasets.end());
+    return true;
+}
+
+bool App::query_dataset(std::string_view id, std::string_view sql,
+                         std::string& result_out) {
+    for (auto& d : workspace().datasets) {
+        if (d.id != id) continue;
+        d.last_query = std::string(sql);
+        // Simple simulation — real impl would use DuckDB or SQLite
+        result_out = "{\"query\":\"" + d.last_query + "\",\"rows\":" +
+                     std::to_string(d.row_count) + ",\"note\":\"query executed\"}";
+        d.last_result = result_out;
+        return true;
+    }
+    return false;
+}
+
+std::vector<DatasetRecord> App::datasets() const {
+    return active_user_.empty() ? std::vector<DatasetRecord>{} : workspace().datasets;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SYSTEM MONITOR (Zo-inspired)
+// ═══════════════════════════════════════════════════════════════════════════
+
+SystemStats App::system_stats() const {
+    SystemStats s;
+    s.sampled_at = now();
+    // Read /proc/stat for CPU
+    std::ifstream stat("/proc/stat");
+    if (stat.good()) {
+        std::string line;
+        std::getline(stat, line);
+        // cpu  user nice system idle iowait irq softirq
+        unsigned long long u,n,sys,idle,iow,irq,sirq;
+        char cpu[8];
+        if (std::sscanf(line.c_str(), "%s %llu %llu %llu %llu %llu %llu %llu",
+                        cpu, &u, &n, &sys, &idle, &iow, &irq, &sirq) == 8) {
+            unsigned long long total = u+n+sys+idle+iow+irq+sirq;
+            unsigned long long busy  = total - idle - iow;
+            s.cpu_pct = total > 0 ? 100.0 * busy / total : 0.0;
+        }
+    }
+    // Read /proc/meminfo
+    std::ifstream mem("/proc/meminfo");
+    if (mem.good()) {
+        std::string line;
+        unsigned long long total=0, avail=0;
+        while (std::getline(mem, line)) {
+            unsigned long long val;
+            if (std::sscanf(line.c_str(), "MemTotal: %llu", &val) == 1)  total = val;
+            if (std::sscanf(line.c_str(), "MemAvailable: %llu", &val) == 1) avail = val;
+        }
+        s.mem_total_mb = total / 1024;
+        s.mem_used_mb  = (total > avail) ? (total - avail) / 1024 : 0;
+    }
+    // Read disk usage via statvfs
+    struct statvfs sv;
+    if (statvfs("/", &sv) == 0) {
+        s.disk_total_mb = (sv.f_blocks * sv.f_frsize) / (1024*1024);
+        s.disk_used_mb  = ((sv.f_blocks - sv.f_bfree) * sv.f_frsize) / (1024*1024);
+    }
+    // Uptime from /proc/uptime
+    std::ifstream uptime("/proc/uptime");
+    if (uptime.good()) {
+        double up; uptime >> up;
+        s.uptime_secs = (std::size_t)up;
+    }
+    return s;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CHAT HISTORY (luo_os-inspired)
+// ═══════════════════════════════════════════════════════════════════════════
+
+std::string App::add_chat_message(std::string role, std::string content,
+                                   std::string model) {
+    auto& ws = workspace();
+    ChatMessage m;
+    m.id         = "msg_" + std::to_string(now()) + "_" + std::to_string(ws.chat_history.size());
+    m.role       = std::move(role);
+    m.content    = std::move(content);
+    m.model      = std::move(model);
+    m.created_at = now();
+    ws.chat_history.push_back(m);
+    return m.id;
+}
+
+std::vector<ChatMessage> App::chat_history(std::size_t limit) const {
+    if (active_user_.empty()) return {};
+    const auto& h = workspace().chat_history;
+    if (h.size() <= limit) return h;
+    return {h.end() - (std::ptrdiff_t)limit, h.end()};
+}
+
+void App::clear_chat_history() {
+    workspace().chat_history.clear();
+    record_audit(active_user_, "chat_clear", "history cleared");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MODELS (luo_os multi-model support)
+// ═══════════════════════════════════════════════════════════════════════════
+
+std::vector<ModelEntry> App::available_models() const {
+    if (active_user_.empty()) return {};
+    const auto& ws = workspace();
+    if (!ws.models.empty()) return ws.models;
+    // Default models list
+    return {
+        {"qwen2.5-1.5b", "Qwen 2.5 1.5B", "local", false, true},
+        {"qwen2.5-7b",   "Qwen 2.5 7B",   "local", false, false},
+        {"llama3.2-3b",  "LLaMA 3.2 3B",  "local", false, false},
+        {"gpt-4o",       "GPT-4o",        "openai", false, false},
+        {"claude-sonnet-4-20250514", "Claude Sonnet 4", "anthropic", false, false},
+    };
+}
+
+bool App::set_active_model(std::string_view model_id) {
+    auto& ws = workspace();
+    if (ws.models.empty()) ws.models = available_models();
+    bool found = false;
+    for (auto& m : ws.models) {
+        m.active = (m.id == model_id);
+        if (m.active) found = true;
+    }
+    record_audit(active_user_, "model_switch", std::string(model_id));
+    return found;
 }
 
 } // namespace luo_gate

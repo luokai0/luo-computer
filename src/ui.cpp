@@ -325,11 +325,19 @@ button,input,select,textarea{font-family:inherit;font-size:.84rem}
         << "<span class='badge' id='nav-task-badge'>" << s.task_count << "</span></button>"
         << "<button class='nav-item' onclick='nav(this,\"agents\")'>🤖 Agents</button>"
         << "<button class='nav-item' onclick='nav(this,\"computer\")'>🖥 Computer</button>"
+        << "<button class='nav-item' onclick='nav(this,\"chat\")'>💬 Chat</button>"
         << "<div class='nav-sep'></div>"
         << "<button class='nav-item' onclick='nav(this,\"files\")'>📁 Files</button>"
         << "<button class='nav-item' onclick='nav(this,\"projects\")'>🚀 Projects</button>"
+        << "<button class='nav-item' onclick='nav(this,\"datasets\")'>📊 Datasets</button>"
         << "<button class='nav-item' onclick='nav(this,\"memory\")'>🧠 Memory</button>"
         << "<button class='nav-item' onclick='nav(this,\"knowledge\")'>📚 Knowledge</button>"
+        << "<div class='nav-sep'></div>"
+        << "<button class='nav-item' onclick='nav(this,\"automations\")'>⏰ Automations</button>"
+        << "<button class='nav-item' onclick='nav(this,\"personas\")'>🎭 Personas</button>"
+        << "<button class='nav-item' onclick='nav(this,\"rules\")'>📜 Rules</button>"
+        << "<button class='nav-item' onclick='nav(this,\"snapshots\")'>📸 Snapshots</button>"
+        << "<button class='nav-item' onclick='nav(this,\"system\")'>📡 System</button>"
         << "<div class='nav-sep'></div>"
         << "<button class='nav-item' onclick='nav(this,\"audit\")'>🔍 Audit</button>"
         << "<button class='nav-item' onclick='nav(this,\"settings\")'>⚙ Settings</button>"
@@ -466,17 +474,24 @@ function nav(btn, panel) {
 function renderPanel(panel) {
   const content = document.getElementById('content');
   switch(panel) {
-    case 'overview':  content.innerHTML = renderOverview();  break;
-    case 'tasks':     content.innerHTML = renderTasks();     break;
-    case 'agents':    content.innerHTML = renderAgents();    break;
-    case 'computer':  content.innerHTML = renderComputer();  break;
-    case 'files':     content.innerHTML = renderFiles();     break;
-    case 'projects':  content.innerHTML = renderProjects();  break;
-    case 'memory':    content.innerHTML = renderMemory();    break;
-    case 'knowledge': content.innerHTML = renderKnowledge(); break;
-    case 'audit':     content.innerHTML = renderAudit();     break;
-    case 'settings':  content.innerHTML = renderSettings();  break;
-    default:          content.innerHTML = renderOverview();
+    case 'overview':    content.innerHTML = renderOverview();    break;
+    case 'tasks':       content.innerHTML = renderTasks();       break;
+    case 'agents':      content.innerHTML = renderAgents();      break;
+    case 'computer':    content.innerHTML = renderComputer();    break;
+    case 'chat':        content.innerHTML = renderChat();        break;
+    case 'files':       content.innerHTML = renderFiles();       break;
+    case 'projects':    content.innerHTML = renderProjects();    break;
+    case 'datasets':    content.innerHTML = renderDatasets();    break;
+    case 'memory':      content.innerHTML = renderMemory();      break;
+    case 'knowledge':   content.innerHTML = renderKnowledge();   break;
+    case 'automations': content.innerHTML = renderAutomations(); break;
+    case 'personas':    content.innerHTML = renderPersonas();    break;
+    case 'rules':       content.innerHTML = renderRules();       break;
+    case 'snapshots':   content.innerHTML = renderSnapshots();   break;
+    case 'system':      content.innerHTML = renderSystem();      break;
+    case 'audit':       content.innerHTML = renderAudit();       break;
+    case 'settings':    content.innerHTML = renderSettings();    break;
+    default:            content.innerHTML = renderOverview();
   }
 }
 
@@ -1098,6 +1113,331 @@ setInterval(() => { refreshState().then(() => renderPanel(currentPanel)); }, 800
 // ─── Boot ────────────────────────────────────────────────────────────────────
 connectSSE();
 renderPanel('overview');
+
+// ─── Chat panel ────────────────────────────────────────────────────────────────
+function renderChat() {
+  return `<div class="card" style="display:flex;flex-direction:column;height:calc(100vh - 120px)">
+    <h3 style="margin-bottom:12px">💬 Chat with luo_os</h3>
+    <div id="chat-msgs" style="flex:1;overflow-y:auto;padding:8px;background:var(--bg);border-radius:8px;margin-bottom:12px;font-size:.875rem"></div>
+    <div style="display:flex;gap:8px">
+      <input id="chat-input" type="text" placeholder="Message luo_os AI..." style="flex:1;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.875rem" onkeydown="if(event.key==='Enter')sendChat()">
+      <button class="btn" onclick="sendChat()">Send ▶</button>
+    </div>
+  </div>`;
+}
+async function sendChat() {
+  const inp = document.getElementById('chat-input');
+  const msg = inp.value.trim();
+  if (!msg) return;
+  inp.value = '';
+  const msgs = document.getElementById('chat-msgs');
+  msgs.innerHTML += `<div style="margin-bottom:8px"><span style="color:var(--accent);font-weight:600">You:</span> ${msg}</div>`;
+  msgs.scrollTop = msgs.scrollHeight;
+  const r = await fetch('/api/luo_os/chat', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg})}).then(r=>r.json()).catch(()=>({}));
+  const reply = r.response || r.error || 'No response';
+  msgs.innerHTML += `<div style="margin-bottom:8px;padding:8px;background:var(--surface2);border-radius:6px"><span style="color:var(--muted);font-weight:600">luo_os:</span> <pre style="margin:4px 0;white-space:pre-wrap;font-size:.8rem">${reply}</pre></div>`;
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+// ─── Snapshots panel ──────────────────────────────────────────────────────────
+function renderSnapshots() {
+  setTimeout(renderSnapshotsAsync, 0);
+  return '<div class="empty">Loading snapshots...</div>';
+}
+async function renderSnapshotsAsync() {
+  const snaps = await fetch('/api/snapshots').then(r=>r.json()).catch(()=>[]);
+  const content = document.getElementById('content');
+  let h = `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <h3>📸 Snapshots (${snaps.length})</h3>
+    <button class="btn" onclick="createSnapshot()">+ New Snapshot</button>
+  </div>`;
+  if (!snaps.length) h += '<div class="empty">No snapshots yet. Create one to save workspace state.</div>';
+  else h += '<div class="scroll-list">' + snaps.map(s => `
+    <div style="display:flex;align-items:center;gap:12px;padding:10px;background:var(--surface2);border-radius:8px">
+      <div style="flex:1"><div style="font-weight:600">${s.label}</div>
+        <div style="color:var(--muted);font-size:.75rem">${new Date(s.created_at*1000).toLocaleString()} · ${(s.size_bytes/1024).toFixed(1)}KB</div>
+        <div style="color:var(--muted);font-size:.72rem;font-family:monospace">${JSON.stringify(s.data)}</div>
+      </div>
+      <button class="btn sm" onclick="restoreSnap('${s.id}')">↩ Restore</button>
+      <button class="btn sm danger" onclick="deleteSnap('${s.id}')">🗑</button>
+    </div>`).join('') + '</div>';
+  h += '</div>';
+  content.innerHTML = h;
+}
+async function createSnapshot() {
+  const label = prompt('Snapshot label (optional):') || '';
+  const r = await fetch('/api/snapshots',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label})}).then(r=>r.json());
+  if(r.ok){toast('Snapshot created');renderPanel('snapshots');}
+}
+async function restoreSnap(id) {
+  if(!confirm('Restore this snapshot?')) return;
+  const r = await fetch(`/api/snapshots/${id}/restore`,{method:'POST'}).then(r=>r.json());
+  if(r.ok){toast('Snapshot restored');await refreshState();renderPanel('snapshots');}
+}
+async function deleteSnap(id) {
+  if(!confirm('Delete snapshot?')) return;
+  await fetch(`/api/snapshots/${id}`,{method:'DELETE'});
+  renderPanel('snapshots');
+}
+
+// ─── Automations panel ────────────────────────────────────────────────────────
+function renderAutomations() {
+  setTimeout(renderAutomationsAsync, 0);
+  return '<div class="empty">Loading automations...</div>';
+}
+async function renderAutomationsAsync() {
+  const autos = await fetch('/api/automations').then(r=>r.json()).catch(()=>[]);
+  const content = document.getElementById('content');
+  let h = `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <h3>⏰ Automations (${autos.length})</h3>
+    <button class="btn" onclick="createAuto()">+ New Automation</button>
+  </div>`;
+  if (!autos.length) h += '<div class="empty">No automations yet. Schedule AI tasks to run automatically.</div>';
+  else h += '<div class="scroll-list">' + autos.map(a => `
+    <div style="padding:10px;background:var(--surface2);border-radius:8px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:1.2rem">${a.enabled ? '✅' : '⏸'}</span>
+        <div style="flex:1">
+          <div style="font-weight:600">${a.name}</div>
+          <div style="color:var(--muted);font-size:.75rem">Schedule: ${a.schedule} · Delivery: ${a.delivery} · Runs: ${a.run_count}</div>
+          <div style="color:var(--text);font-size:.8rem;margin-top:4px;font-style:italic">"${a.prompt}"</div>
+          ${a.last_output?`<div style="color:var(--muted);font-size:.72rem;margin-top:4px;font-family:monospace">Last: ${a.last_output.substring(0,100)}</div>`:''}
+        </div>
+        <div style="display:flex;gap:6px;flex-direction:column">
+          <button class="btn sm" onclick="runAutoNow('${a.id}')">▶ Run now</button>
+          <button class="btn sm" onclick="toggleAuto('${a.id}',${!a.enabled})">${a.enabled?'Pause':'Enable'}</button>
+          <button class="btn sm danger" onclick="deleteAuto('${a.id}')">🗑</button>
+        </div>
+      </div>
+    </div>`).join('') + '</div>';
+  h += '</div>';
+  content.innerHTML = h;
+}
+async function createAuto() {
+  const name = prompt('Automation name:'); if(!name) return;
+  const prompt_text = prompt('What should the AI do?'); if(!prompt_text) return;
+  const schedule = prompt('Schedule (cron expression, e.g. "0 9 * * 1-5" for 9am weekdays):') || '0 9 * * *';
+  const delivery = prompt('Delivery: dashboard, email, sms, none') || 'dashboard';
+  const r = await fetch('/api/automations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,prompt:prompt_text,schedule,delivery})}).then(r=>r.json());
+  if(r.ok){toast('Automation created');renderPanel('automations');}
+}
+async function runAutoNow(id) {
+  const r = await fetch(`/api/automations/${id}/run`,{method:'POST'}).then(r=>r.json());
+  if(r.ok){toast('Automation ran ✓');renderPanel('automations');}else toast('Run failed','err');
+}
+async function toggleAuto(id, enabled) {
+  await fetch(`/api/automations/${id}/toggle`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:String(enabled)})});
+  renderPanel('automations');
+}
+async function deleteAuto(id) {
+  if(!confirm('Delete automation?')) return;
+  await fetch(`/api/automations/${id}`,{method:'DELETE'});
+  renderPanel('automations');
+}
+
+// ─── Personas panel ────────────────────────────────────────────────────────────
+function renderPersonas() {
+  setTimeout(renderPersonasAsync, 0);
+  return '<div class="empty">Loading personas...</div>';
+}
+async function renderPersonasAsync() {
+  const personas = await fetch('/api/personas').then(r=>r.json()).catch(()=>[]);
+  const content = document.getElementById('content');
+  let h = `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <h3>🎭 Personas (${personas.length})</h3>
+    <button class="btn" onclick="createPersona()">+ New Persona</button>
+  </div>`;
+  if (!personas.length) h += '<div class="empty">No personas yet. Create named AI configs with different instructions and models.</div>';
+  else h += '<div class="scroll-list">' + personas.map(p => `
+    <div style="display:flex;align-items:center;gap:12px;padding:10px;background:var(--surface2);border-radius:8px;border:2px solid ${p.active?'var(--accent)':'transparent'}">
+      <div style="font-size:1.5rem">🎭</div>
+      <div style="flex:1">
+        <div style="font-weight:600">${p.name} ${p.active?'<span style="color:var(--accent);font-size:.7rem">ACTIVE</span>':''}</div>
+        <div style="color:var(--muted);font-size:.75rem">Model: ${p.model||'default'} · Tone: ${p.tone}</div>
+        <div style="color:var(--text);font-size:.8rem;margin-top:4px">${p.instructions.substring(0,120)}${p.instructions.length>120?'...':''}</div>
+      </div>
+      <div style="display:flex;gap:6px;flex-direction:column">
+        ${!p.active?`<button class="btn sm" onclick="activatePersona('${p.id}')">Activate</button>`:'<button class="btn sm" style="opacity:.4" disabled>Active</button>'}
+        <button class="btn sm danger" onclick="deletePersona('${p.id}')">🗑</button>
+      </div>
+    </div>`).join('') + '</div>';
+  h += '</div>';
+  content.innerHTML = h;
+}
+async function createPersona() {
+  const name = prompt('Persona name (e.g. "Code Expert"):'); if(!name) return;
+  const instructions = prompt('System instructions for this persona:'); if(!instructions) return;
+  const model = prompt('Model ID (leave blank for default):') || '';
+  const tone = prompt('Tone: technical, friendly, concise, verbose') || 'technical';
+  const r = await fetch('/api/personas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,instructions,model,tone})}).then(r=>r.json());
+  if(r.ok){toast('Persona created');renderPanel('personas');}
+}
+async function activatePersona(id) {
+  const r = await fetch(`/api/personas/${id}/activate`,{method:'POST'}).then(r=>r.json());
+  if(r.ok){toast('Persona activated');renderPanel('personas');}
+}
+async function deletePersona(id) {
+  if(!confirm('Delete persona?')) return;
+  await fetch(`/api/personas/${id}`,{method:'DELETE'});
+  renderPanel('personas');
+}
+
+// ─── Rules panel ───────────────────────────────────────────────────────────────
+function renderRules() {
+  setTimeout(renderRulesAsync, 0);
+  return '<div class="empty">Loading rules...</div>';
+}
+async function renderRulesAsync() {
+  const rules = await fetch('/api/rules').then(r=>r.json()).catch(()=>[]);
+  const content = document.getElementById('content');
+  let h = `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <h3>📜 Rules (${rules.length})</h3>
+    <button class="btn" onclick="createRule()">+ New Rule</button>
+  </div>
+  <p style="color:var(--muted);font-size:.8rem;margin-bottom:12px">Rules are persistent AI behavior instructions injected into every agent interaction.</p>`;
+  if (!rules.length) h += '<div class="empty">No rules yet. Add persistent instructions that always apply to AI responses.</div>';
+  else h += '<div class="scroll-list">' + rules.map(r => `
+    <div style="display:flex;align-items:center;gap:12px;padding:10px;background:var(--surface2);border-radius:8px;opacity:${r.enabled?1:0.5}">
+      <div style="font-size:1.2rem">${r.enabled?'✅':'⏸'}</div>
+      <div style="flex:1">
+        <div style="font-weight:600">${r.title}</div>
+        <div style="color:var(--muted);font-size:.75rem">Condition: ${r.condition}</div>
+        <div style="color:var(--text);font-size:.8rem;margin-top:4px;font-style:italic">${r.instruction}</div>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn sm" onclick="toggleRule('${r.id}',${!r.enabled})">${r.enabled?'Disable':'Enable'}</button>
+        <button class="btn sm danger" onclick="deleteRule('${r.id}')">🗑</button>
+      </div>
+    </div>`).join('') + '</div>';
+  h += '</div>';
+  content.innerHTML = h;
+}
+async function createRule() {
+  const title = prompt('Rule title:'); if(!title) return;
+  const condition = prompt('When does this apply? (e.g. "always", "when coding", "when writing"):') || 'always';
+  const instruction = prompt('What should the AI do?'); if(!instruction) return;
+  const r = await fetch('/api/rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,condition,instruction})}).then(r=>r.json());
+  if(r.ok){toast('Rule created');renderPanel('rules');}
+}
+async function toggleRule(id, enabled) {
+  await fetch(`/api/rules/${id}/toggle`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:String(enabled)})});
+  renderPanel('rules');
+}
+async function deleteRule(id) {
+  if(!confirm('Delete rule?')) return;
+  await fetch(`/api/rules/${id}`,{method:'DELETE'});
+  renderPanel('rules');
+}
+
+// ─── Datasets panel ────────────────────────────────────────────────────────────
+function renderDatasets() {
+  setTimeout(renderDatasetsAsync, 0);
+  return '<div class="empty">Loading datasets...</div>';
+}
+async function renderDatasetsAsync() {
+  const datasets = await fetch('/api/datasets').then(r=>r.json()).catch(()=>[]);
+  const content = document.getElementById('content');
+  let h = `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <h3>📊 Datasets (${datasets.length})</h3>
+    <button class="btn" onclick="createDataset()">+ Import Dataset</button>
+  </div>`;
+  if (!datasets.length) h += '<div class="empty">No datasets yet. Import CSV, JSON, or JSONL data.</div>';
+  else h += '<div class="scroll-list">' + datasets.map(d => `
+    <div style="padding:10px;background:var(--surface2);border-radius:8px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="font-size:1.4rem">📊</div>
+        <div style="flex:1">
+          <div style="font-weight:600">${d.name}</div>
+          <div style="color:var(--muted);font-size:.75rem">${d.format.toUpperCase()} · ${d.row_count} rows · ${new Date(d.created_at*1000).toLocaleDateString()}</div>
+          ${d.last_query?`<div style="color:var(--muted);font-size:.72rem;font-family:monospace;margin-top:4px">Last query: ${d.last_query}</div>`:''}
+        </div>
+        <div style="display:flex;gap:6px;flex-direction:column">
+          <button class="btn sm" onclick="queryDataset('${d.id}')">Query</button>
+          <button class="btn sm danger" onclick="deleteDataset('${d.id}')">🗑</button>
+        </div>
+      </div>
+    </div>`).join('') + '</div>';
+  h += '</div>';
+  content.innerHTML = h;
+}
+async function createDataset() {
+  const name = prompt('Dataset name:'); if(!name) return;
+  const format = prompt('Format: csv, json, jsonl') || 'csv';
+  const content_text = prompt('Paste data content (or leave blank):') || '';
+  const r = await fetch('/api/datasets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,format,content:content_text})}).then(r=>r.json());
+  if(r.ok){toast('Dataset imported');renderPanel('datasets');}
+}
+async function queryDataset(id) {
+  const sql = prompt('SQL query:') || 'SELECT * FROM data LIMIT 10';
+  const r = await fetch(`/api/datasets/${id}/query`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sql})}).then(r=>r.json());
+  alert(JSON.stringify(r, null, 2));
+}
+async function deleteDataset(id) {
+  if(!confirm('Delete dataset?')) return;
+  await fetch(`/api/datasets/${id}`,{method:'DELETE'});
+  renderPanel('datasets');
+}
+
+// ─── System monitor panel ──────────────────────────────────────────────────────
+function renderSystem() {
+  setTimeout(renderSystemAsync, 0);
+  return '<div class="empty">Loading system stats...</div>';
+}
+async function renderSystemAsync() {
+  const s = await fetch('/api/system').then(r=>r.json()).catch(()=>({}));
+  const luo = await fetch('/api/luo_os/status').then(r=>r.json()).catch(()=>({}));
+  const content = document.getElementById('content');
+  const bar = (pct, color='var(--accent)') =>
+    `<div style="height:8px;background:var(--surface2);border-radius:4px;overflow:hidden;margin-top:4px">
+      <div style="height:100%;width:${Math.min(pct,100)}%;background:${pct>85?'#ef4444':pct>60?'#f59e0b':color};border-radius:4px;transition:width .3s"></div>
+    </div>`;
+  const fmtUptime = s => {
+    if(!s) return 'unknown';
+    const d=Math.floor(s/86400),h=Math.floor((s%86400)/3600),m=Math.floor((s%3600)/60);
+    return d?`${d}d ${h}h ${m}m`:h?`${h}h ${m}m`:`${m}m`;
+  };
+  let h = `<div class="card"><h3 style="margin-bottom:20px">📡 System Monitor</h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:20px">
+      <div style="background:var(--surface2);padding:16px;border-radius:10px">
+        <div style="color:var(--muted);font-size:.75rem;margin-bottom:6px">CPU</div>
+        <div style="font-size:1.6rem;font-weight:700;color:${s.cpu_pct>85?'#ef4444':s.cpu_pct>60?'#f59e0b':'var(--accent)'}">${s.cpu_pct??'–'}%</div>
+        ${bar(s.cpu_pct)}
+      </div>
+      <div style="background:var(--surface2);padding:16px;border-radius:10px">
+        <div style="color:var(--muted);font-size:.75rem;margin-bottom:6px">Memory</div>
+        <div style="font-size:1.6rem;font-weight:700">${s.mem_pct??'–'}%</div>
+        <div style="color:var(--muted);font-size:.72rem">${s.mem_used_mb??'–'} / ${s.mem_total_mb??'–'} MB</div>
+        ${bar(s.mem_pct)}
+      </div>
+      <div style="background:var(--surface2);padding:16px;border-radius:10px">
+        <div style="color:var(--muted);font-size:.75rem;margin-bottom:6px">Disk</div>
+        <div style="font-size:1.6rem;font-weight:700">${s.disk_pct??'–'}%</div>
+        <div style="color:var(--muted);font-size:.72rem">${Math.round((s.disk_used_mb??0)/1024)} / ${Math.round((s.disk_total_mb??0)/1024)} GB</div>
+        ${bar(s.disk_pct)}
+      </div>
+      <div style="background:var(--surface2);padding:16px;border-radius:10px">
+        <div style="color:var(--muted);font-size:.75rem;margin-bottom:6px">Uptime</div>
+        <div style="font-size:1.3rem;font-weight:700;color:var(--accent)">${fmtUptime(s.uptime_secs)}</div>
+      </div>
+    </div>`;
+
+  // luo_os subsystem status
+  if (luo && luo.services) {
+    h += `<h4 style="margin-bottom:12px">luo_os Services</h4>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">`;
+    for (const [svc, ok] of Object.entries(luo.services)) {
+      h += `<div style="padding:6px 12px;border-radius:6px;background:var(--surface2);font-size:.8rem">
+        <span style="color:${ok?'#22c55e':'#ef4444'}">${ok?'●':'○'}</span> ${svc}</div>`;
+    }
+    h += '</div>';
+    if (luo.skill_categories) {
+      h += `<div style="color:var(--muted);font-size:.8rem">Skill library: ${luo.skill_categories} categories loaded</div>`;
+    }
+  }
+  h += `<div style="margin-top:12px"><button class="btn sm" onclick="renderPanel('system')">↻ Refresh</button></div></div>`;
+  content.innerHTML = h;
+}
+
 </script>)JS";
 
     out << "</body></html>";

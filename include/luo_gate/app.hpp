@@ -275,6 +275,92 @@ struct AgentMessage {
     Timestamp   created_at = 0;
 };
 
+// ─── Snapshot (Zo-inspired) ───────────────────────────────────────────────────
+struct SnapshotRecord {
+    std::string id;
+    std::string label;
+    Timestamp   created_at = 0;
+    std::string data_json; // serialized workspace state
+    std::size_t size_bytes = 0;
+};
+
+// ─── Automation (Zo-inspired scheduled tasks) ─────────────────────────────────
+struct AutomationRecord {
+    std::string id;
+    std::string name;
+    std::string prompt;           // AI task description
+    std::string schedule;         // cron expression e.g. "0 9 * * 1-5"
+    std::string delivery;         // "dashboard"|"sms"|"email"|"none"
+    bool        enabled    = true;
+    Timestamp   last_ran   = 0;
+    Timestamp   next_run   = 0;
+    std::string last_output;
+    int         run_count  = 0;
+};
+
+// ─── Persona (Zo-inspired AI personality configs) ─────────────────────────────
+struct PersonaRecord {
+    std::string id;
+    std::string name;
+    std::string instructions; // system-prompt override
+    std::string model;        // preferred model e.g. "qwen2.5-1.5b"|"gpt-4o"
+    std::string tone;         // "technical"|"friendly"|"concise"|"verbose"
+    bool        active = false;
+};
+
+// ─── Rule (Zo-inspired persistent AI behavior rules) ─────────────────────────
+struct RuleRecord {
+    std::string id;
+    std::string title;
+    std::string condition; // e.g. "always"|"when coding"|"when writing"
+    std::string instruction; // e.g. "always use TypeScript for new files"
+    bool        enabled = true;
+    Timestamp   created_at = 0;
+};
+
+// ─── Dataset (Zo-inspired structured data) ────────────────────────────────────
+struct DatasetRecord {
+    std::string id;
+    std::string name;
+    std::string format;        // "csv"|"json"|"sqlite"|"jsonl"
+    std::string content;       // raw content (small datasets) or path
+    std::size_t row_count  = 0;
+    std::size_t col_count  = 0;
+    std::string schema_json;   // column names + types as JSON
+    Timestamp   created_at = 0;
+    std::string last_query;
+    std::string last_result;
+};
+
+// ─── System stats (Zo-inspired monitor) ──────────────────────────────────────
+struct SystemStats {
+    double      cpu_pct       = 0.0;
+    std::size_t mem_used_mb   = 0;
+    std::size_t mem_total_mb  = 0;
+    std::size_t disk_used_mb  = 0;
+    std::size_t disk_total_mb = 0;
+    std::size_t uptime_secs   = 0;
+    Timestamp   sampled_at    = 0;
+};
+
+// ─── Streaming chat token (luo_os SSE-inspired) ───────────────────────────────
+struct ChatMessage {
+    std::string id;
+    std::string role;    // "user"|"assistant"
+    std::string content;
+    std::string model;
+    Timestamp   created_at = 0;
+};
+
+// ─── Model entry (luo_os multi-model support) ────────────────────────────────
+struct ModelEntry {
+    std::string id;
+    std::string name;
+    std::string provider;  // "local"|"openai"|"anthropic"|"luo_os"
+    bool        available  = false;
+    bool        active     = false;
+};
+
 // ─── Workspace ───────────────────────────────────────────────────────────────
 struct Workspace {
     ConsentFlags              consent;
@@ -308,6 +394,16 @@ struct Workspace {
     std::map<std::string, std::string> role_permissions; // user->role
     // Lazy swarm: false until full 10k pool has been generated
     bool swarm_expanded = false;
+    // ── Zo-inspired features ──────────────────────────────────────────────
+    std::vector<SnapshotRecord>   snapshots;
+    std::vector<AutomationRecord> automations;
+    std::vector<PersonaRecord>    personas;
+    std::vector<RuleRecord>       rules;
+    std::vector<DatasetRecord>    datasets;
+    // ── luo_os multi-model + chat history ────────────────────────────────
+    std::vector<ModelEntry>       models;
+    std::vector<ChatMessage>      chat_history;
+    std::string                   active_persona_id;
 };
 
 // ─── Summary ─────────────────────────────────────────────────────────────────
@@ -468,6 +564,58 @@ public:
                                                   std::size_t limit = 20) const;
     bool export_workspace_snapshot(const std::filesystem::path& dest) const;
     bool import_workspace_snapshot(const std::filesystem::path& src);
+
+    // ── Snapshots (Zo-inspired) ────────────────────────────────────────────
+    std::string  create_snapshot(std::string label = "");
+    bool         restore_snapshot(std::string_view id);
+    bool         delete_snapshot(std::string_view id);
+    std::vector<SnapshotRecord> snapshots() const;
+
+    // ── Automations (Zo-inspired scheduled AI tasks) ───────────────────────
+    std::string  create_automation(std::string name, std::string prompt,
+                                   std::string schedule, std::string delivery = "dashboard");
+    bool         toggle_automation(std::string_view id, bool enabled);
+    bool         delete_automation(std::string_view id);
+    bool         run_automation_now(std::string_view id);
+    std::vector<AutomationRecord> automations() const;
+    void         tick_automations();  // called by background thread
+
+    // ── Personas (Zo-inspired AI personality configs) ──────────────────────
+    std::string  create_persona(std::string name, std::string instructions,
+                                std::string model = "", std::string tone = "technical");
+    bool         activate_persona(std::string_view id);
+    bool         delete_persona(std::string_view id);
+    std::vector<PersonaRecord> personas() const;
+    PersonaRecord active_persona() const;
+
+    // ── Rules (Zo-inspired persistent AI behavior) ─────────────────────────
+    std::string  create_rule(std::string title, std::string condition,
+                             std::string instruction);
+    bool         toggle_rule(std::string_view id, bool enabled);
+    bool         delete_rule(std::string_view id);
+    std::vector<RuleRecord> rules() const;
+    std::string  active_rules_prompt() const; // all enabled rules as system prompt
+
+    // ── Datasets (Zo-inspired structured data) ─────────────────────────────
+    std::string  create_dataset(std::string name, std::string format,
+                                std::string content);
+    bool         delete_dataset(std::string_view id);
+    bool         query_dataset(std::string_view id, std::string_view sql,
+                               std::string& result_out);
+    std::vector<DatasetRecord> datasets() const;
+
+    // ── System monitor (Zo-inspired) ───────────────────────────────────────
+    SystemStats  system_stats() const;
+
+    // ── Chat history (luo_os-inspired) ────────────────────────────────────
+    std::string  add_chat_message(std::string role, std::string content,
+                                  std::string model = "");
+    std::vector<ChatMessage> chat_history(std::size_t limit = 100) const;
+    void         clear_chat_history();
+
+    // ── Models (luo_os multi-model) ───────────────────────────────────────
+    std::vector<ModelEntry> available_models() const;
+    bool         set_active_model(std::string_view model_id);
 
     // Files & projects (steps 51-60)
     bool upload_file(std::string name, std::string content,

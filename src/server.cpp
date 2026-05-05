@@ -39,6 +39,67 @@ std::string json_str(std::string_view s) {
 
 std::string json_bool(bool b) { return b ? "true" : "false"; }
 
+// escape_json: same as json_str but returns the inner string (without outer quotes)
+std::string escape_json(std::string_view s) {
+    std::ostringstream o;
+    for (unsigned char c : s) {
+        switch (c) {
+            case '"':  o << "\\\""; break;
+            case '\\': o << "\\\\"; break;
+            case '\n': o << "\\n";  break;
+            case '\r': o << "\\r";  break;
+            case '\t': o << "\\t";  break;
+            default:   o << c;      break;
+        }
+    }
+    return o.str();
+}
+
+// Minimal JSON body parser: extracts top-level string values
+// Handles: {"key":"value","key2":"value2","key3":true/false/number}
+std::map<std::string, std::string> parse_json(const std::string& body) {
+    std::map<std::string, std::string> out;
+    // Walk through looking for "key":"value" or "key":value pairs
+    std::size_t i = 0;
+    auto skip_ws = [&]{ while (i < body.size() && std::isspace((unsigned char)body[i])) ++i; };
+    auto read_str = [&]() -> std::string {
+        if (i >= body.size() || body[i] != '"') return {};
+        ++i; // skip opening "
+        std::string r;
+        while (i < body.size() && body[i] != '"') {
+            if (body[i] == '\\' && i+1 < body.size()) { ++i; r += body[i]; }
+            else r += body[i];
+            ++i;
+        }
+        if (i < body.size()) ++i; // skip closing "
+        return r;
+    };
+    while (i < body.size()) {
+        skip_ws();
+        if (i >= body.size() || body[i] == '}') break;
+        if (body[i] == '{' || body[i] == ',') { ++i; continue; }
+        if (body[i] != '"') { ++i; continue; }
+        std::string key = read_str();
+        skip_ws();
+        if (i < body.size() && body[i] == ':') ++i;
+        skip_ws();
+        std::string val;
+        if (i < body.size() && body[i] == '"') {
+            val = read_str();
+        } else {
+            // bare value (number, true, false, null, nested)
+            std::size_t start = i;
+            while (i < body.size() && body[i] != ',' && body[i] != '}') ++i;
+            val = body.substr(start, i - start);
+            // trim whitespace
+            while (!val.empty() && std::isspace((unsigned char)val.back())) val.pop_back();
+        }
+        if (!key.empty()) out[key] = val;
+    }
+    return out;
+}
+
+
 // ─── Summary JSON ─────────────────────────────────────────────────────────────
 std::string summary_json(const App& app) {
     const auto s = app.summary();
@@ -876,6 +937,399 @@ int run_server(App& app, int port) {
                 return true;  // keep connection alive
             }
         );
+    });
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // SNAPSHOTS (Zo-inspired)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    svr.Get("/api/snapshots", [&](const httplib::Request&, httplib::Response& res) {
+        WRITE_LOCK(app);
+        std::string j = "[";
+        for (const auto& s : app.snapshots()) {
+            if (j.size() > 1) j += ",";
+            j += "{\"id\":\"" + s.id + "\",\"label\":\"" + escape_json(s.label) +
+                 "\",\"created_at\":" + std::to_string(s.created_at) +
+                 ",\"size_bytes\":" + std::to_string(s.size_bytes) +
+                 ",\"data\":" + s.data_json + "}";
+        }
+        j += "]";
+        json_ok(res, j);
+    });
+
+    svr.Post("/api/snapshots", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto body = parse_json(req.body);
+        std::string label = body.count("label") ? body["label"] : "";
+        auto id = app.create_snapshot(label);
+        json_ok(res, "{\"id\":\"" + id + "\",\"ok\":true}");
+    });
+
+    svr.Post("/api/snapshots/:id/restore", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        bool ok = app.restore_snapshot(req.path_params.at("id"));
+        json_ok(res, ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"not found\"}");
+    });
+
+    svr.Delete("/api/snapshots/:id", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        bool ok = app.delete_snapshot(req.path_params.at("id"));
+        json_ok(res, ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"not found\"}");
+    });
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // AUTOMATIONS (Zo-inspired)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    svr.Get("/api/automations", [&](const httplib::Request&, httplib::Response& res) {
+        WRITE_LOCK(app);
+        std::string j = "[";
+        for (const auto& a : app.automations()) {
+            if (j.size() > 1) j += ",";
+            j += "{\"id\":\"" + a.id + "\",\"name\":\"" + escape_json(a.name) +
+                 "\",\"prompt\":\"" + escape_json(a.prompt) +
+                 "\",\"schedule\":\"" + escape_json(a.schedule) +
+                 "\",\"delivery\":\"" + a.delivery +
+                 "\",\"enabled\":" + (a.enabled ? "true" : "false") +
+                 ",\"last_ran\":" + std::to_string(a.last_ran) +
+                 ",\"next_run\":" + std::to_string(a.next_run) +
+                 ",\"run_count\":" + std::to_string(a.run_count) +
+                 ",\"last_output\":\"" + escape_json(a.last_output) + "\"}";
+        }
+        j += "]";
+        json_ok(res, j);
+    });
+
+    svr.Post("/api/automations", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto body = parse_json(req.body);
+        if (!body.count("name") || !body.count("prompt") || !body.count("schedule")) {
+            res.status = 400;
+            json_ok(res, "{\"error\":\"name, prompt, schedule required\"}"); return;
+        }
+        auto id = app.create_automation(body["name"], body["prompt"],
+                                        body["schedule"],
+                                        body.count("delivery") ? body["delivery"] : "dashboard");
+        json_ok(res, "{\"id\":\"" + id + "\",\"ok\":true}");
+    });
+
+    svr.Post("/api/automations/:id/toggle", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto body = parse_json(req.body);
+        bool enabled = body.count("enabled") ? (body["enabled"] == "true") : true;
+        bool ok = app.toggle_automation(req.path_params.at("id"), enabled);
+        json_ok(res, ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"not found\"}");
+    });
+
+    svr.Post("/api/automations/:id/run", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        bool ok = app.run_automation_now(req.path_params.at("id"));
+        json_ok(res, ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"not found\"}");
+    });
+
+    svr.Delete("/api/automations/:id", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        bool ok = app.delete_automation(req.path_params.at("id"));
+        json_ok(res, ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"not found\"}");
+    });
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // PERSONAS (Zo-inspired)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    svr.Get("/api/personas", [&](const httplib::Request&, httplib::Response& res) {
+        WRITE_LOCK(app);
+        std::string j = "[";
+        for (const auto& p : app.personas()) {
+            if (j.size() > 1) j += ",";
+            j += "{\"id\":\"" + p.id + "\",\"name\":\"" + escape_json(p.name) +
+                 "\",\"instructions\":\"" + escape_json(p.instructions) +
+                 "\",\"model\":\"" + escape_json(p.model) +
+                 "\",\"tone\":\"" + p.tone +
+                 "\",\"active\":" + (p.active ? "true" : "false") + "}";
+        }
+        j += "]";
+        json_ok(res, j);
+    });
+
+    svr.Post("/api/personas", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto body = parse_json(req.body);
+        if (!body.count("name") || !body.count("instructions")) {
+            res.status = 400;
+            json_ok(res, "{\"error\":\"name and instructions required\"}"); return;
+        }
+        auto id = app.create_persona(body["name"], body["instructions"],
+                                     body.count("model") ? body["model"] : "",
+                                     body.count("tone")  ? body["tone"]  : "technical");
+        json_ok(res, "{\"id\":\"" + id + "\",\"ok\":true}");
+    });
+
+    svr.Post("/api/personas/:id/activate", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        bool ok = app.activate_persona(req.path_params.at("id"));
+        json_ok(res, ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"not found\"}");
+    });
+
+    svr.Delete("/api/personas/:id", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        bool ok = app.delete_persona(req.path_params.at("id"));
+        json_ok(res, ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"not found\"}");
+    });
+
+    svr.Get("/api/personas/active", [&](const httplib::Request&, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto p = app.active_persona();
+        if (p.id.empty()) { json_ok(res, "null"); return; }
+        json_ok(res, "{\"id\":\"" + p.id + "\",\"name\":\"" + escape_json(p.name) +
+                     "\",\"instructions\":\"" + escape_json(p.instructions) +
+                     "\",\"model\":\"" + escape_json(p.model) + "\"}");
+    });
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // RULES (Zo-inspired)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    svr.Get("/api/rules", [&](const httplib::Request&, httplib::Response& res) {
+        WRITE_LOCK(app);
+        std::string j = "[";
+        for (const auto& r : app.rules()) {
+            if (j.size() > 1) j += ",";
+            j += "{\"id\":\"" + r.id + "\",\"title\":\"" + escape_json(r.title) +
+                 "\",\"condition\":\"" + escape_json(r.condition) +
+                 "\",\"instruction\":\"" + escape_json(r.instruction) +
+                 "\",\"enabled\":" + (r.enabled ? "true" : "false") +
+                 ",\"created_at\":" + std::to_string(r.created_at) + "}";
+        }
+        j += "]";
+        json_ok(res, j);
+    });
+
+    svr.Post("/api/rules", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto body = parse_json(req.body);
+        if (!body.count("title") || !body.count("instruction")) {
+            res.status = 400;
+            json_ok(res, "{\"error\":\"title and instruction required\"}"); return;
+        }
+        auto id = app.create_rule(body["title"],
+                                  body.count("condition") ? body["condition"] : "always",
+                                  body["instruction"]);
+        json_ok(res, "{\"id\":\"" + id + "\",\"ok\":true}");
+    });
+
+    svr.Post("/api/rules/:id/toggle", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto body = parse_json(req.body);
+        bool enabled = !body.count("enabled") || body["enabled"] == "true";
+        bool ok = app.toggle_rule(req.path_params.at("id"), enabled);
+        json_ok(res, ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"not found\"}");
+    });
+
+    svr.Delete("/api/rules/:id", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        bool ok = app.delete_rule(req.path_params.at("id"));
+        json_ok(res, ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"not found\"}");
+    });
+
+    svr.Get("/api/rules/prompt", [&](const httplib::Request&, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto prompt = app.active_rules_prompt();
+        json_ok(res, "{\"prompt\":\"" + escape_json(prompt) + "\"}");
+    });
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // DATASETS (Zo-inspired)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    svr.Get("/api/datasets", [&](const httplib::Request&, httplib::Response& res) {
+        WRITE_LOCK(app);
+        std::string j = "[";
+        for (const auto& d : app.datasets()) {
+            if (j.size() > 1) j += ",";
+            j += "{\"id\":\"" + d.id + "\",\"name\":\"" + escape_json(d.name) +
+                 "\",\"format\":\"" + d.format +
+                 "\",\"row_count\":" + std::to_string(d.row_count) +
+                 ",\"col_count\":" + std::to_string(d.col_count) +
+                 ",\"created_at\":" + std::to_string(d.created_at) +
+                 ",\"last_query\":\"" + escape_json(d.last_query) + "\"}";
+        }
+        j += "]";
+        json_ok(res, j);
+    });
+
+    svr.Post("/api/datasets", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto body = parse_json(req.body);
+        if (!body.count("name") || !body.count("format")) {
+            res.status = 400;
+            json_ok(res, "{\"error\":\"name and format required\"}"); return;
+        }
+        auto id = app.create_dataset(body["name"], body["format"],
+                                     body.count("content") ? body["content"] : "");
+        json_ok(res, "{\"id\":\"" + id + "\",\"ok\":true}");
+    });
+
+    svr.Post("/api/datasets/:id/query", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto body = parse_json(req.body);
+        std::string result;
+        bool ok = app.query_dataset(req.path_params.at("id"),
+                                    body.count("sql") ? body["sql"] : "",
+                                    result);
+        json_ok(res, ok ? result : "{\"error\":\"dataset not found\"}");
+    });
+
+    svr.Delete("/api/datasets/:id", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        bool ok = app.delete_dataset(req.path_params.at("id"));
+        json_ok(res, ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"not found\"}");
+    });
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // SYSTEM MONITOR (Zo-inspired)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    svr.Get("/api/system", [&](const httplib::Request&, httplib::Response& res) {
+        READ_LOCK(app);
+        auto s = app.system_stats();
+        std::string j = "{";
+        j += "\"cpu_pct\":"        + std::to_string((int)s.cpu_pct) + ",";
+        j += "\"mem_used_mb\":"    + std::to_string(s.mem_used_mb) + ",";
+        j += "\"mem_total_mb\":"   + std::to_string(s.mem_total_mb) + ",";
+        j += "\"mem_pct\":"        + std::to_string(s.mem_total_mb > 0 ? (int)(100.0*s.mem_used_mb/s.mem_total_mb) : 0) + ",";
+        j += "\"disk_used_mb\":"   + std::to_string(s.disk_used_mb) + ",";
+        j += "\"disk_total_mb\":"  + std::to_string(s.disk_total_mb) + ",";
+        j += "\"disk_pct\":"       + std::to_string(s.disk_total_mb > 0 ? (int)(100.0*s.disk_used_mb/s.disk_total_mb) : 0) + ",";
+        j += "\"uptime_secs\":"    + std::to_string(s.uptime_secs) + ",";
+        j += "\"sampled_at\":"     + std::to_string(s.sampled_at);
+        j += "}";
+        json_ok(res, j);
+    });
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // CHAT HISTORY (luo_os-inspired)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    svr.Get("/api/chat", [&](const httplib::Request& req, httplib::Response& res) {
+        READ_LOCK(app);
+        std::size_t limit = 100;
+        if (req.has_param("limit")) {
+            try { limit = std::stoul(req.get_param_value("limit")); } catch (...) {}
+        }
+        std::string j = "[";
+        for (const auto& m : app.chat_history(limit)) {
+            if (j.size() > 1) j += ",";
+            j += "{\"id\":\"" + m.id + "\",\"role\":\"" + m.role +
+                 "\",\"content\":\"" + escape_json(m.content) +
+                 "\",\"model\":\"" + escape_json(m.model) +
+                 "\",\"created_at\":" + std::to_string(m.created_at) + "}";
+        }
+        j += "]";
+        json_ok(res, j);
+    });
+
+    svr.Post("/api/chat", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto body = parse_json(req.body);
+        if (!body.count("role") || !body.count("content")) {
+            res.status = 400;
+            json_ok(res, "{\"error\":\"role and content required\"}"); return;
+        }
+        auto id = app.add_chat_message(body["role"], body["content"],
+                                       body.count("model") ? body["model"] : "");
+        json_ok(res, "{\"id\":\"" + id + "\",\"ok\":true}");
+    });
+
+    svr.Post("/api/chat/clear", [&](const httplib::Request&, httplib::Response& res) {
+        WRITE_LOCK(app);
+        app.clear_chat_history();
+        json_ok(res, "{\"ok\":true}");
+    });
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // MODELS (luo_os multi-model)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    svr.Get("/api/models", [&](const httplib::Request&, httplib::Response& res) {
+        READ_LOCK(app);
+        std::string j = "[";
+        for (const auto& m : app.available_models()) {
+            if (j.size() > 1) j += ",";
+            j += "{\"id\":\"" + m.id + "\",\"name\":\"" + escape_json(m.name) +
+                 "\",\"provider\":\"" + m.provider +
+                 "\",\"available\":" + (m.available ? "true" : "false") +
+                 ",\"active\":" + (m.active ? "true" : "false") + "}";
+        }
+        j += "]";
+        json_ok(res, j);
+    });
+
+    svr.Post("/api/models/:id/activate", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        bool ok = app.set_active_model(req.path_params.at("id"));
+        json_ok(res, ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"not found\"}");
+    });
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // LUO_OS BRIDGE PROXY (luo_os features via Python)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    svr.Post("/api/luo_os/chat", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto body = parse_json(req.body);
+        std::string msg = body.count("message") ? body["message"] : "";
+        if (msg.empty()) { res.status = 400; json_ok(res, "{\"error\":\"message required\"}"); return; }
+
+        // Store user message
+        app.add_chat_message("user", msg);
+
+        // Route to luo_os bridge
+        std::string cmd = "python3 luo_os/bridge.py chat " + msg + " 2>/dev/null";
+        FILE* pipe = popen(cmd.c_str(), "r");
+        std::string out;
+        if (pipe) { char buf[512]; while (fgets(buf, sizeof(buf), pipe)) out += buf; pclose(pipe); }
+
+        // Store assistant response
+        std::string response = out.empty() ? "luo_os bridge not available" : out;
+        app.add_chat_message("assistant", response, "luo_os");
+        json_ok(res, "{\"response\":\"" + escape_json(response) + "\",\"ok\":true}");
+    });
+
+    svr.Get("/api/luo_os/status", [&](const httplib::Request&, httplib::Response& res) {
+        READ_LOCK(app);
+        FILE* pipe = popen("python3 luo_os/bridge.py status 2>/dev/null", "r");
+        std::string out;
+        if (pipe) { char buf[512]; while (fgets(buf, sizeof(buf), pipe)) out += buf; pclose(pipe); }
+        res.set_content(out.empty() ? "{\"error\":\"bridge unavailable\"}" : out, "application/json");
+        set_cors(res);
+    });
+
+    svr.Get("/api/luo_os/skills", [&](const httplib::Request&, httplib::Response& res) {
+        READ_LOCK(app);
+        FILE* pipe = popen("python3 luo_os/bridge.py skills list 2>/dev/null", "r");
+        std::string out;
+        if (pipe) { char buf[512]; while (fgets(buf, sizeof(buf), pipe)) out += buf; pclose(pipe); }
+        res.set_content(out.empty() ? "{\"error\":\"bridge unavailable\"}" : out, "application/json");
+        set_cors(res);
+    });
+
+    svr.Get("/api/luo_os/memory", [&](const httplib::Request&, httplib::Response& res) {
+        READ_LOCK(app);
+        FILE* pipe = popen("python3 luo_os/bridge.py memory stats 2>/dev/null", "r");
+        std::string out;
+        if (pipe) { char buf[512]; while (fgets(buf, sizeof(buf), pipe)) out += buf; pclose(pipe); }
+        res.set_content(out.empty() ? "{\"error\":\"bridge unavailable\"}" : out, "application/json");
+        set_cors(res);
+    });
+
+    svr.Get("/api/luo_os/kairos", [&](const httplib::Request&, httplib::Response& res) {
+        READ_LOCK(app);
+        FILE* pipe = popen("python3 luo_os/bridge.py kairos status 2>/dev/null", "r");
+        std::string out;
+        if (pipe) { char buf[512]; while (fgets(buf, sizeof(buf), pipe)) out += buf; pclose(pipe); }
+        res.set_content(out.empty() ? "{\"error\":\"bridge unavailable\"}" : out, "application/json");
+        set_cors(res);
     });
 
     // ── CORS preflight ────────────────────────────────────────────────────────
