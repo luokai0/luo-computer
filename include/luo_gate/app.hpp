@@ -275,6 +275,42 @@ struct AgentMessage {
     Timestamp   created_at = 0;
 };
 
+// ─── Note ────────────────────────────────────────────────────────────────────
+struct NoteRecord {
+    std::string              id;
+    std::string              title;
+    std::string              content;   // markdown
+    std::vector<std::string> tags;
+    bool                     pinned     = false;
+    Timestamp                created_at = 0;
+    Timestamp                updated_at = 0;
+};
+
+// ─── Notification ─────────────────────────────────────────────────────────────
+struct NotificationRecord {
+    std::string id;
+    std::string kind;    // "info"|"success"|"warn"|"error"
+    std::string title;
+    std::string detail;
+    bool        read       = false;
+    Timestamp   created_at = 0;
+    std::string action_url; // optional deep link
+};
+
+// ─── Git status ───────────────────────────────────────────────────────────────
+struct GitStatus {
+    std::string branch;
+    std::string remote;
+    int         ahead      = 0;
+    int         behind     = 0;
+    std::vector<std::string> staged;
+    std::vector<std::string> unstaged;
+    std::vector<std::string> untracked;
+    std::string last_commit_hash;
+    std::string last_commit_msg;
+    Timestamp   last_commit_at = 0;
+};
+
 // ─── Snapshot (Zo-inspired) ───────────────────────────────────────────────────
 struct SnapshotRecord {
     std::string id;
@@ -404,6 +440,10 @@ struct Workspace {
     std::vector<ModelEntry>       models;
     std::vector<ChatMessage>      chat_history;
     std::string                   active_persona_id;
+    // ── Workspace features ────────────────────────────────────────────────
+    std::vector<NoteRecord>         notes;
+    std::vector<NotificationRecord> notifications;
+    std::string                     git_cwd;   // working dir for git ops
 };
 
 // ─── Summary ─────────────────────────────────────────────────────────────────
@@ -613,6 +653,57 @@ public:
     std::vector<ChatMessage> chat_history(std::size_t limit = 100) const;
     void         clear_chat_history();
 
+    // ── Notes ──────────────────────────────────────────────────────────────
+    std::string  create_note(std::string title, std::string content,
+                             std::vector<std::string> tags = {});
+    bool         update_note(std::string_view id, std::string title,
+                             std::string content, std::vector<std::string> tags);
+    bool         pin_note(std::string_view id, bool pinned);
+    bool         delete_note(std::string_view id);
+    std::vector<NoteRecord> notes(std::string_view tag_filter = "") const;
+
+    // ── Notifications ──────────────────────────────────────────────────────
+    std::string  push_notification(std::string kind, std::string title,
+                                   std::string detail, std::string action_url = "");
+    bool         mark_notification_read(std::string_view id);
+    void         mark_all_notifications_read();
+    bool         delete_notification(std::string_view id);
+    std::vector<NotificationRecord> notifications(bool unread_only = false) const;
+    std::size_t  unread_notification_count() const;
+
+    // ── Terminal execution ─────────────────────────────────────────────────
+    TerminalOutput exec_command(std::string command, std::string cwd = "");
+    void           clear_terminal_history();
+
+    // ── Git integration ───────────────────────────────────────────────────
+    GitStatus    git_status(std::string cwd = "") const;
+    std::string  git_log(std::string cwd = "", int limit = 20) const;
+    std::string  git_diff(std::string cwd = "", std::string file = "") const;
+    std::string  git_commit(std::string message, std::string cwd = "");
+    std::string  git_add(std::string pattern, std::string cwd = "");
+    std::string  git_pull(std::string cwd = "");
+    std::string  git_push(std::string cwd = "");
+    void         set_git_cwd(std::string cwd);
+
+    // ── Global search ──────────────────────────────────────────────────────
+    struct SearchResult {
+        std::string kind;   // "task"|"file"|"memory"|"note"|"knowledge"|"agent"
+        std::string id;
+        std::string title;
+        std::string snippet;
+        double      score = 0.0;
+    };
+    std::vector<SearchResult> global_search(std::string_view query,
+                                             std::size_t limit = 30) const;
+    std::vector<SearchResult> search_all(std::string_view query,
+                                          std::size_t limit = 30) const;
+
+    // ── File upload/download (binary-safe) ────────────────────────────────
+    bool         write_file_content(std::string name, std::string content,
+                                    std::string project_scope = "");
+    std::string  read_file_content(std::string_view name) const;
+    bool         delete_file(std::string_view name);
+
     // ── Models (luo_os multi-model) ───────────────────────────────────────
     std::vector<ModelEntry> available_models() const;
     bool         set_active_model(std::string_view model_id);
@@ -678,15 +769,7 @@ public:
     void rebuild_search_index();
 
     // Search across everything (step 44,60,73)
-    struct SearchResult {
-        std::string kind;   // "task"|"file"|"memory"|"knowledge"|"agent"|"log"
-        std::string id;
-        std::string title;
-        std::string excerpt;
-        double      score = 0.0;
-    };
-    std::vector<SearchResult> search_all(std::string_view query,
-                                          std::size_t limit = 30) const;
+    // global_search is declared above
 
 private:
     void set_session_stage(SessionStage stage, std::string detail);

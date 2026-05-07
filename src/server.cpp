@@ -398,7 +398,7 @@ std::string search_json(const App& app, const std::string& query) {
           << "\"kind\":"    << json_str(r.kind)    << ','
           << "\"id\":"      << json_str(r.id)      << ','
           << "\"title\":"   << json_str(r.title)   << ','
-          << "\"excerpt\":" << json_str(r.excerpt) << ','
+          << "\"excerpt\":" << json_str(r.snippet) << ','
           << "\"score\":"   << r.score
           << '}';
     }
@@ -1337,6 +1337,286 @@ int run_server(App& app, int port) {
         if (pipe) { char buf[512]; while (fgets(buf, sizeof(buf), pipe)) out += buf; pclose(pipe); }
         res.set_content(out.empty() ? "{\"error\":\"bridge unavailable\"}" : out, "application/json");
         set_cors(res);
+    });
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // NOTES
+    // ══════════════════════════════════════════════════════════════════════════
+
+    svr.Get("/api/notes", [&](const httplib::Request& req, httplib::Response& res) {
+        READ_LOCK(app);
+        std::string tag = req.has_param("tag") ? req.get_param_value("tag") : "";
+        std::string j = "[";
+        for (const auto& n : app.notes(tag)) {
+            if (j.size() > 1) j += ",";
+            j += "{\"id\":" + json_str(n.id) + ",\"title\":" + json_str(n.title) +
+                 ",\"content\":" + json_str(n.content.substr(0, 300)) +
+                 ",\"pinned\":" + json_bool(n.pinned) +
+                 ",\"created_at\":" + std::to_string(n.created_at) +
+                 ",\"updated_at\":" + std::to_string(n.updated_at) +
+                 ",\"tags\":[" + [&]{ std::string t; for (auto& tg : n.tags) { if (!t.empty()) t+=","; t+=json_str(tg); } return t; }() + "]}";
+        }
+        j += "]";
+        json_ok(res, j);
+    });
+
+    svr.Get("/api/notes/:id", [&](const httplib::Request& req, httplib::Response& res) {
+        READ_LOCK(app);
+        for (const auto& n : app.notes()) {
+            if (n.id == req.path_params.at("id")) {
+                json_ok(res, "{\"id\":" + json_str(n.id) + ",\"title\":" + json_str(n.title) +
+                             ",\"content\":" + json_str(n.content) +
+                             ",\"pinned\":" + json_bool(n.pinned) +
+                             ",\"created_at\":" + std::to_string(n.created_at) +
+                             ",\"updated_at\":" + std::to_string(n.updated_at) + "}");
+                return;
+            }
+        }
+        res.status = 404; json_ok(res, "{\"error\":\"not found\"}");
+    });
+
+    svr.Post("/api/notes", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto body = parse_json(req.body);
+        if (!body.count("title")) { res.status = 400; json_ok(res, "{\"error\":\"title required\"}"); return; }
+        auto id = app.create_note(body["title"], body.count("content") ? body["content"] : "");
+        json_ok(res, "{\"id\":" + json_str(id) + ",\"ok\":true}");
+    });
+
+    svr.Put("/api/notes/:id", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto body = parse_json(req.body);
+        bool ok = app.update_note(req.path_params.at("id"),
+                                  body.count("title")   ? body["title"]   : "",
+                                  body.count("content") ? body["content"] : "",
+                                  {});
+        json_ok(res, ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"not found\"}");
+    });
+
+    svr.Post("/api/notes/:id/pin", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto body = parse_json(req.body);
+        bool pinned = !body.count("pinned") || body["pinned"] == "true";
+        bool ok = app.pin_note(req.path_params.at("id"), pinned);
+        json_ok(res, ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"not found\"}");
+    });
+
+    svr.Delete("/api/notes/:id", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        bool ok = app.delete_note(req.path_params.at("id"));
+        json_ok(res, ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"not found\"}");
+    });
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // NOTIFICATIONS
+    // ══════════════════════════════════════════════════════════════════════════
+
+    svr.Get("/api/notifications", [&](const httplib::Request& req, httplib::Response& res) {
+        READ_LOCK(app);
+        bool unread_only = req.has_param("unread") && req.get_param_value("unread") == "1";
+        std::string j = "{\"unread\":" + std::to_string(app.unread_notification_count()) + ",\"items\":[";
+        bool first = true;
+        for (const auto& n : app.notifications(unread_only)) {
+            if (!first) j += ","; first = false;
+            j += "{\"id\":" + json_str(n.id) + ",\"kind\":" + json_str(n.kind) +
+                 ",\"title\":" + json_str(n.title) + ",\"detail\":" + json_str(n.detail) +
+                 ",\"read\":" + json_bool(n.read) +
+                 ",\"action_url\":" + json_str(n.action_url) +
+                 ",\"created_at\":" + std::to_string(n.created_at) + "}";
+        }
+        j += "]}";
+        json_ok(res, j);
+    });
+
+    svr.Post("/api/notifications/:id/read", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        bool ok = app.mark_notification_read(req.path_params.at("id"));
+        json_ok(res, ok ? "{\"ok\":true}" : "{\"ok\":false}");
+    });
+
+    svr.Post("/api/notifications/read-all", [&](const httplib::Request&, httplib::Response& res) {
+        WRITE_LOCK(app);
+        app.mark_all_notifications_read();
+        json_ok(res, "{\"ok\":true}");
+    });
+
+    svr.Delete("/api/notifications/:id", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        bool ok = app.delete_notification(req.path_params.at("id"));
+        json_ok(res, ok ? "{\"ok\":true}" : "{\"ok\":false}");
+    });
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // TERMINAL EXECUTION
+    // ══════════════════════════════════════════════════════════════════════════
+
+    svr.Post("/api/terminal/exec", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto body = parse_json(req.body);
+        if (!body.count("command")) { res.status = 400; json_ok(res, "{\"error\":\"command required\"}"); return; }
+        auto result = app.exec_command(body["command"], body.count("cwd") ? body["cwd"] : "");
+        json_ok(res, "{\"command\":" + json_str(result.command) +
+                     ",\"output\":" + json_str(result.output) +
+                     ",\"exit_code\":" + std::to_string(result.exit_code) +
+                     ",\"created_at\":" + std::to_string(result.created_at) + "}");
+    });
+
+    svr.Get("/api/terminal/history", [&](const httplib::Request& req, httplib::Response& res) {
+        READ_LOCK(app);
+        std::size_t limit = 50;
+        if (req.has_param("limit")) try { limit = std::stoul(req.get_param_value("limit")); } catch (...) {}
+        std::string j = "[";
+        for (const auto& e : app.terminal_history(limit)) {
+            if (j.size() > 1) j += ",";
+            j += "{\"command\":" + json_str(e.command) +
+                 ",\"output\":" + json_str(e.output.substr(0, 2048)) +
+                 ",\"exit_code\":" + std::to_string(e.exit_code) +
+                 ",\"created_at\":" + std::to_string(e.created_at) + "}";
+        }
+        j += "]";
+        json_ok(res, j);
+    });
+
+    svr.Post("/api/terminal/clear", [&](const httplib::Request&, httplib::Response& res) {
+        WRITE_LOCK(app);
+        app.clear_terminal_history();
+        json_ok(res, "{\"ok\":true}");
+    });
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // GIT INTEGRATION
+    // ══════════════════════════════════════════════════════════════════════════
+
+    svr.Get("/api/git/status", [&](const httplib::Request& req, httplib::Response& res) {
+        READ_LOCK(app);
+        std::string cwd = req.has_param("cwd") ? req.get_param_value("cwd") : "";
+        auto gs = app.git_status(cwd);
+        std::string staged_j = "[", unstaged_j = "[", untracked_j = "[";
+        for (const auto& f : gs.staged)    { if (staged_j.size()>1) staged_j+=",";    staged_j   += json_str(f); }
+        for (const auto& f : gs.unstaged)  { if (unstaged_j.size()>1) unstaged_j+=","; unstaged_j += json_str(f); }
+        for (const auto& f : gs.untracked) { if (untracked_j.size()>1) untracked_j+=",";untracked_j+= json_str(f); }
+        staged_j+="]"; unstaged_j+="]"; untracked_j+="]";
+        json_ok(res, "{\"branch\":" + json_str(gs.branch) +
+                     ",\"remote\":" + json_str(gs.remote) +
+                     ",\"ahead\":" + std::to_string(gs.ahead) +
+                     ",\"behind\":" + std::to_string(gs.behind) +
+                     ",\"staged\":" + staged_j +
+                     ",\"unstaged\":" + unstaged_j +
+                     ",\"untracked\":" + untracked_j +
+                     ",\"last_commit_hash\":" + json_str(gs.last_commit_hash) +
+                     ",\"last_commit_msg\":" + json_str(gs.last_commit_msg) +
+                     ",\"last_commit_at\":" + std::to_string(gs.last_commit_at) + "}");
+    });
+
+    svr.Get("/api/git/log", [&](const httplib::Request& req, httplib::Response& res) {
+        READ_LOCK(app);
+        std::string cwd = req.has_param("cwd") ? req.get_param_value("cwd") : "";
+        int limit = 20;
+        if (req.has_param("limit")) try { limit = std::stoi(req.get_param_value("limit")); } catch (...) {}
+        auto log = app.git_log(cwd, limit);
+        json_ok(res, "{\"log\":" + json_str(log) + "}");
+    });
+
+    svr.Get("/api/git/diff", [&](const httplib::Request& req, httplib::Response& res) {
+        READ_LOCK(app);
+        std::string cwd  = req.has_param("cwd")  ? req.get_param_value("cwd")  : "";
+        std::string file = req.has_param("file") ? req.get_param_value("file") : "";
+        auto diff = app.git_diff(cwd, file);
+        json_ok(res, "{\"diff\":" + json_str(diff) + "}");
+    });
+
+    svr.Post("/api/git/add", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto body = parse_json(req.body);
+        auto out = app.git_add(body.count("pattern") ? body["pattern"] : ".",
+                               body.count("cwd")     ? body["cwd"]     : "");
+        json_ok(res, "{\"output\":" + json_str(out) + ",\"ok\":true}");
+    });
+
+    svr.Post("/api/git/commit", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto body = parse_json(req.body);
+        if (!body.count("message")) { res.status = 400; json_ok(res, "{\"error\":\"message required\"}"); return; }
+        auto out = app.git_commit(body["message"], body.count("cwd") ? body["cwd"] : "");
+        json_ok(res, "{\"output\":" + json_str(out) + ",\"ok\":true}");
+    });
+
+    svr.Post("/api/git/pull", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto body = parse_json(req.body);
+        auto out = app.git_pull(body.count("cwd") ? body["cwd"] : "");
+        json_ok(res, "{\"output\":" + json_str(out) + ",\"ok\":true}");
+    });
+
+    svr.Post("/api/git/push", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto body = parse_json(req.body);
+        auto out = app.git_push(body.count("cwd") ? body["cwd"] : "");
+        json_ok(res, "{\"output\":" + json_str(out) + ",\"ok\":true}");
+    });
+
+    svr.Post("/api/git/cwd", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto body = parse_json(req.body);
+        app.set_git_cwd(body.count("cwd") ? body["cwd"] : "");
+        json_ok(res, "{\"ok\":true}");
+    });
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // GLOBAL SEARCH
+    // ══════════════════════════════════════════════════════════════════════════
+
+    svr.Get("/api/search", [&](const httplib::Request& req, httplib::Response& res) {
+        READ_LOCK(app);
+        std::string q = req.has_param("q") ? req.get_param_value("q") : "";
+        if (q.empty()) { json_ok(res, "{\"results\":[],\"query\":\"\"}"); return; }
+        std::size_t limit = 30;
+        if (req.has_param("limit")) try { limit = std::stoul(req.get_param_value("limit")); } catch (...) {}
+        auto results = app.global_search(q, limit);
+        std::string j = "{\"query\":" + json_str(q) + ",\"count\":" + std::to_string(results.size()) + ",\"results\":[";
+        bool first = true;
+        for (const auto& r : results) {
+            if (!first) j += ","; first = false;
+            j += "{\"kind\":" + json_str(r.kind) + ",\"id\":" + json_str(r.id) +
+                 ",\"title\":" + json_str(r.title) + ",\"snippet\":" + json_str(r.snippet) +
+                 ",\"score\":" + std::to_string(r.score) + "}";
+        }
+        j += "]}";
+        json_ok(res, j);
+    });
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // FILE UPLOAD / DOWNLOAD (enhanced)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    svr.Post("/api/files/upload", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        auto body = parse_json(req.body);
+        if (!body.count("name") || !body.count("content")) {
+            res.status = 400; json_ok(res, "{\"error\":\"name and content required\"}"); return;
+        }
+        bool ok = app.write_file_content(body["name"], body["content"],
+                                         body.count("scope") ? body["scope"] : "");
+        json_ok(res, ok ? "{\"ok\":true,\"name\":" + json_str(body["name"]) + "}"
+                        : "{\"ok\":false}");
+    });
+
+    svr.Get("/api/files/:name/download", [&](const httplib::Request& req, httplib::Response& res) {
+        READ_LOCK(app);
+        auto content = app.read_file_content(req.path_params.at("name"));
+        if (content.empty() && app.notes().empty()) {
+            res.status = 404; json_ok(res, "{\"error\":\"not found\"}"); return;
+        }
+        res.set_header("Content-Disposition",
+                       "attachment; filename=\"" + req.path_params.at("name") + "\"");
+        res.set_content(content, "application/octet-stream");
+        set_cors(res);
+    });
+
+    svr.Delete("/api/files/:name", [&](const httplib::Request& req, httplib::Response& res) {
+        WRITE_LOCK(app);
+        bool ok = app.delete_file(req.path_params.at("name"));
+        json_ok(res, ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"not found\"}");
     });
 
     // ── CORS preflight ────────────────────────────────────────────────────────

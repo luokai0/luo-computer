@@ -1,3 +1,4 @@
+#include <cstring>
 #include <sys/statvfs.h>
 #include "luo_gate/app.hpp"
 #include "luo_gate/platform.hpp"
@@ -1312,9 +1313,6 @@ bool App::import_luo_os(std::filesystem::path source_root) {
     return true;
 }
 
-} // namespace luo_gate
-
-namespace luo_gate {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Steps 12-20: Agent system extensions
@@ -1631,6 +1629,10 @@ std::vector<TerminalOutput> App::terminal_history(std::size_t limit) const {
     auto out = active_user_.empty() ? std::vector<TerminalOutput>{} : workspace().terminal_history;
     if (out.size() > limit) out.erase(out.begin(), out.end() - static_cast<std::ptrdiff_t>(limit));
     return out;
+}
+
+void App::clear_terminal_history() {
+    if (!active_user_.empty()) workspace().terminal_history.clear();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2040,9 +2042,6 @@ std::vector<App::SearchResult> App::search_all(std::string_view query,
 }
 
 
-} // namespace luo_gate
-
-namespace luo_gate {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // P2: Background tick engine
@@ -2583,6 +2582,420 @@ bool App::set_active_model(std::string_view model_id) {
     }
     record_audit(active_user_, "model_switch", std::string(model_id));
     return found;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NOTES
+// ═══════════════════════════════════════════════════════════════════════════
+
+std::string App::create_note(std::string title, std::string content,
+                              std::vector<std::string> tags) {
+    auto& ws = workspace();
+    NoteRecord n;
+    n.id         = "note-" + std::to_string(ws.notes.size() + 1) + "-" + std::to_string(now());
+    n.title      = std::move(title);
+    n.content    = std::move(content);
+    n.tags       = std::move(tags);
+    n.pinned     = false;
+    n.created_at = now();
+    n.updated_at = n.created_at;
+    ws.notes.push_back(n);
+    push_notification("success", "Note created", "\"" + ws.notes.back().title + "\"");
+    return ws.notes.back().id;
+}
+
+bool App::update_note(std::string_view id, std::string title,
+                       std::string content, std::vector<std::string> tags) {
+    for (auto& n : workspace().notes) {
+        if (n.id != id) continue;
+        n.title      = std::move(title);
+        n.content    = std::move(content);
+        n.tags       = std::move(tags);
+        n.updated_at = now();
+        return true;
+    }
+    return false;
+}
+
+bool App::pin_note(std::string_view id, bool pinned) {
+    for (auto& n : workspace().notes) {
+        if (n.id == id) { n.pinned = pinned; return true; }
+    }
+    return false;
+}
+
+bool App::delete_note(std::string_view id) {
+    auto& ws = workspace();
+    auto it = std::remove_if(ws.notes.begin(), ws.notes.end(),
+        [&](const NoteRecord& n){ return n.id == id; });
+    if (it == ws.notes.end()) return false;
+    ws.notes.erase(it, ws.notes.end());
+    return true;
+}
+
+std::vector<NoteRecord> App::notes(std::string_view tag_filter) const {
+    if (active_user_.empty()) return {};
+    const auto& all = workspace().notes;
+    if (tag_filter.empty()) {
+        auto sorted = all;
+        std::stable_sort(sorted.begin(), sorted.end(),
+            [](const NoteRecord& a, const NoteRecord& b){
+                if (a.pinned != b.pinned) return a.pinned > b.pinned;
+                return a.updated_at > b.updated_at;
+            });
+        return sorted;
+    }
+    std::vector<NoteRecord> result;
+    for (const auto& n : all) {
+        for (const auto& t : n.tags) {
+            if (t == tag_filter) { result.push_back(n); break; }
+        }
+    }
+    return result;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NOTIFICATIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+std::string App::push_notification(std::string kind, std::string title,
+                                    std::string detail, std::string action_url) {
+    if (active_user_.empty()) return {};
+    auto& ws = workspace();
+    NotificationRecord n;
+    n.id         = "notif-" + std::to_string(ws.notifications.size() + 1) + "-" + std::to_string(now());
+    n.kind       = std::move(kind);
+    n.title      = std::move(title);
+    n.detail     = std::move(detail);
+    n.action_url = std::move(action_url);
+    n.read       = false;
+    n.created_at = now();
+    ws.notifications.push_back(n);
+    // Keep last 200
+    if (ws.notifications.size() > 200)
+        ws.notifications.erase(ws.notifications.begin(),
+                               ws.notifications.begin() + (long)(ws.notifications.size() - 200));
+    return ws.notifications.back().id;
+}
+
+bool App::mark_notification_read(std::string_view id) {
+    for (auto& n : workspace().notifications) {
+        if (n.id == id) { n.read = true; return true; }
+    }
+    return false;
+}
+
+void App::mark_all_notifications_read() {
+    for (auto& n : workspace().notifications) n.read = true;
+}
+
+bool App::delete_notification(std::string_view id) {
+    auto& ws = workspace();
+    auto it = std::remove_if(ws.notifications.begin(), ws.notifications.end(),
+        [&](const NotificationRecord& n){ return n.id == id; });
+    if (it == ws.notifications.end()) return false;
+    ws.notifications.erase(it, ws.notifications.end());
+    return true;
+}
+
+std::vector<NotificationRecord> App::notifications(bool unread_only) const {
+    if (active_user_.empty()) return {};
+    std::vector<NotificationRecord> result;
+    const auto& all = workspace().notifications;
+    for (auto it = all.rbegin(); it != all.rend(); ++it) {
+        if (!unread_only || !it->read) result.push_back(*it);
+    }
+    return result;
+}
+
+std::size_t App::unread_notification_count() const {
+    if (active_user_.empty()) return 0;
+    std::size_t count = 0;
+    for (const auto& n : workspace().notifications) if (!n.read) ++count;
+    return count;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TERMINAL EXECUTION
+// ═══════════════════════════════════════════════════════════════════════════
+
+TerminalOutput App::exec_command(std::string command, std::string cwd) {
+    TerminalOutput entry;
+    entry.command = command;
+    entry.created_at  = now();
+
+    // Build the shell command with optional cwd
+    std::string full_cmd = command;
+    if (!cwd.empty()) {
+        full_cmd = "cd " + cwd + " && " + command;
+    }
+    full_cmd += " 2>&1";
+
+    FILE* pipe = popen(full_cmd.c_str(), "r");
+    if (!pipe) {
+        entry.output    = "[error: could not execute command]";
+        entry.exit_code = -1;
+    } else {
+        char buf[512];
+        std::size_t total = 0;
+        while (fgets(buf, sizeof(buf), pipe) && total < 65536) {
+            entry.output += buf;
+            total += strlen(buf);
+        }
+        entry.exit_code = pclose(pipe);
+    }
+
+    // Trim very long output
+    if (entry.output.size() > 32768)
+        entry.output = entry.output.substr(0, 32768) + "\n...[truncated]";
+
+    if (!active_user_.empty()) {
+        auto& ws = workspace();
+        ws.terminal_history.push_back(entry);
+        if (ws.terminal_history.size() > 500)
+            ws.terminal_history.erase(ws.terminal_history.begin());
+        // Push notification if command failed
+        if (entry.exit_code != 0) {
+            push_notification("warn", "Command failed (exit " + std::to_string(entry.exit_code) + ")",
+                              command.substr(0, 60));
+        }
+    }
+    return entry;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GIT INTEGRATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+static std::string run_git(const std::string& args, const std::string& cwd) {
+    std::string cmd = "git -C " + (cwd.empty() ? "." : cwd) + " " + args + " 2>&1";
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return "[git error]";
+    std::string out;
+    char buf[512];
+    while (fgets(buf, sizeof(buf), pipe)) out += buf;
+    pclose(pipe);
+    return out;
+}
+
+GitStatus App::git_status(std::string cwd) const {
+    if (cwd.empty() && !active_user_.empty()) cwd = workspace().git_cwd;
+    GitStatus gs;
+
+    // Branch
+    gs.branch = run_git("rev-parse --abbrev-ref HEAD", cwd);
+    if (!gs.branch.empty() && gs.branch.back() == '\n') gs.branch.pop_back();
+
+    // Remote
+    gs.remote = run_git("remote get-url origin", cwd);
+    if (!gs.remote.empty() && gs.remote.back() == '\n') gs.remote.pop_back();
+
+    // Ahead/behind
+    auto ab = run_git("rev-list --left-right --count HEAD...@{upstream}", cwd);
+    if (ab.find('\t') != std::string::npos) {
+        try {
+            gs.ahead  = std::stoi(ab.substr(0, ab.find('\t')));
+            gs.behind = std::stoi(ab.substr(ab.find('\t') + 1));
+        } catch (...) {}
+    }
+
+    // Staged / unstaged / untracked
+    auto porcelain = run_git("status --porcelain", cwd);
+    std::istringstream ss(porcelain);
+    std::string line;
+    while (std::getline(ss, line)) {
+        if (line.size() < 3) continue;
+        char index = line[0], work = line[1];
+        std::string file = line.substr(3);
+        if (index != ' ' && index != '?') gs.staged.push_back(file);
+        if (work  != ' ' && work  != '?') gs.unstaged.push_back(file);
+        if (index == '?' && work  == '?') gs.untracked.push_back(file);
+    }
+
+    // Last commit
+    auto log = run_git("log -1 --format='%H HASH %s MSG %ct'", cwd);
+    auto p1  = log.find(" HASH ");
+    auto p2  = log.find(" MSG ");
+    if (p1 != std::string::npos && p2 != std::string::npos) {
+        gs.last_commit_hash = log.substr(0, p1);
+        gs.last_commit_msg  = log.substr(p1 + 6, p2 - p1 - 6);
+        try { gs.last_commit_at = std::stoll(log.substr(p2 + 5)); } catch (...) {}
+    }
+
+    return gs;
+}
+
+std::string App::git_log(std::string cwd, int limit) const {
+    if (cwd.empty() && !active_user_.empty()) cwd = workspace().git_cwd;
+    return run_git("log --oneline -" + std::to_string(limit) +
+                   " --format='%h %s (%cr)'", cwd);
+}
+
+std::string App::git_diff(std::string cwd, std::string file) const {
+    if (cwd.empty() && !active_user_.empty()) cwd = workspace().git_cwd;
+    return run_git("diff --stat" + (file.empty() ? "" : " -- " + file), cwd);
+}
+
+std::string App::git_commit(std::string message, std::string cwd) {
+    if (cwd.empty() && !active_user_.empty()) cwd = workspace().git_cwd;
+    auto out = run_git("commit -m " + json_str(message), cwd);
+    if (!active_user_.empty())
+        push_notification("success", "Git commit", message.substr(0, 60));
+    return out;
+}
+
+std::string App::git_add(std::string pattern, std::string cwd) {
+    if (cwd.empty() && !active_user_.empty()) cwd = workspace().git_cwd;
+    return run_git("add " + (pattern.empty() ? "." : pattern), cwd);
+}
+
+std::string App::git_pull(std::string cwd) {
+    if (cwd.empty() && !active_user_.empty()) cwd = workspace().git_cwd;
+    auto out = run_git("pull", cwd);
+    if (!active_user_.empty())
+        push_notification("info", "Git pull", out.substr(0, 80));
+    return out;
+}
+
+std::string App::git_push(std::string cwd) {
+    if (cwd.empty() && !active_user_.empty()) cwd = workspace().git_cwd;
+    auto out = run_git("push", cwd);
+    if (!active_user_.empty())
+        push_notification("info", "Git push", out.substr(0, 80));
+    return out;
+}
+
+void App::set_git_cwd(std::string cwd) {
+    if (!active_user_.empty()) workspace().git_cwd = std::move(cwd);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GLOBAL SEARCH
+// ═══════════════════════════════════════════════════════════════════════════
+
+std::vector<App::SearchResult> App::global_search(std::string_view query,
+                                                    std::size_t limit) const {
+    if (active_user_.empty() || query.empty()) return {};
+    const auto& ws = workspace();
+    std::vector<SearchResult> results;
+    std::string q(query);
+    std::transform(q.begin(), q.end(), q.begin(), ::tolower);
+
+    auto score_text = [&](const std::string& text) -> double {
+        std::string t = text; std::transform(t.begin(), t.end(), t.begin(), ::tolower);
+        if (t.find(q) == std::string::npos) return 0.0;
+        return 1.0 + (double)q.size() / (double)(t.size() + 1);
+    };
+
+    // Tasks
+    for (const auto& t : ws.tasks) {
+        double s = score_text(t.title) * 1.5 + score_text(t.description);
+        if (s > 0) {
+            SearchResult r; r.kind = "task"; r.id = t.id; r.title = t.title;
+            r.snippet = t.description.substr(0, 120); r.score = s;
+            results.push_back(r);
+        }
+    }
+    // Files
+    for (const auto& f : ws.files) {
+        double s = score_text(f.name) * 2.0 + score_text(f.content) * 0.5;
+        if (s > 0) {
+            std::string snip = f.content.substr(0, 120);
+            std::string fl = f.content;
+            std::transform(fl.begin(), fl.end(), fl.begin(), ::tolower);
+            if (auto pos = fl.find(q); pos != std::string::npos)
+                snip = f.content.substr(std::max((std::size_t)0, pos - 20), 120);
+            SearchResult r; r.kind = "file"; r.id = f.name; r.title = f.name;
+            r.snippet = snip; r.score = s;
+            results.push_back(r);
+        }
+    }
+    // Memory
+    for (const auto& m : ws.memory_store) {
+        double s = score_text(m.kind) + score_text(m.content);
+        if (s > 0) {
+            SearchResult r; r.kind = "memory"; r.id = m.id;
+            r.title = m.kind + ": " + m.content.substr(0, 50);
+            r.snippet = m.content.substr(0, 120); r.score = s;
+            results.push_back(r);
+        }
+    }
+    // Notes
+    for (const auto& n : ws.notes) {
+        double s = score_text(n.title) * 2.0 + score_text(n.content) * 0.7;
+        if (s > 0) {
+            SearchResult r; r.kind = "note"; r.id = n.id; r.title = n.title;
+            r.snippet = n.content.substr(0, 120); r.score = s;
+            results.push_back(r);
+        }
+    }
+    // Agents
+    for (const auto& a : ws.agents) {
+        double s = score_text(a.id) * 2.0 + score_text(a.role);
+        if (s > 0) {
+            SearchResult r; r.kind = "agent"; r.id = a.id; r.title = a.id;
+            r.snippet = a.role; r.score = s;
+            results.push_back(r);
+        }
+    }
+    // Projects
+    for (const auto& p : ws.projects) {
+        double s = score_text(p.name) * 2.0 + score_text(p.command);
+        if (s > 0) {
+            SearchResult r; r.kind = "project"; r.id = p.id; r.title = p.name;
+            r.snippet = p.command.substr(0, 120); r.score = s;
+            results.push_back(r);
+        }
+    }
+
+    std::stable_sort(results.begin(), results.end(),
+        [](const SearchResult& a, const SearchResult& b){ return a.score > b.score; });
+    if (results.size() > limit) results.resize(limit);
+    return results;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FILE OPERATIONS (enhanced)
+// ═══════════════════════════════════════════════════════════════════════════
+
+bool App::write_file_content(std::string name, std::string content,
+                              std::string project_scope) {
+    auto& ws = workspace();
+    for (auto& f : ws.files) {
+        if (f.name == name) {
+            FileVersion ver;
+            ver.content    = f.content;
+            ver.saved_at   = now();
+            ver.saved_by   = "user";
+            f.history.push_back(ver);
+            f.content      = std::move(content);
+            return true;
+        }
+    }
+    // New file
+    FileRecord f;
+    f.name          = std::move(name);
+    f.content       = std::move(content);
+    f.created_at    = now();
+    f.project_scope = std::move(project_scope);
+    ws.files.push_back(std::move(f));
+    return true;
+}
+
+std::string App::read_file_content(std::string_view name) const {
+    if (active_user_.empty()) return {};
+    for (const auto& f : workspace().files)
+        if (f.name == name) return f.content;
+    return {};
+}
+
+bool App::delete_file(std::string_view name) {
+    auto& ws = workspace();
+    auto it = std::remove_if(ws.files.begin(), ws.files.end(),
+        [&](const FileRecord& f){ return f.name == name; });
+    if (it == ws.files.end()) return false;
+    ws.files.erase(it, ws.files.end());
+    return true;
 }
 
 } // namespace luo_gate

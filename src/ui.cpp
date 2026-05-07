@@ -325,8 +325,10 @@ button,input,select,textarea{font-family:inherit;font-size:.84rem}
         << "<span class='badge' id='nav-task-badge'>" << s.task_count << "</span></button>"
         << "<button class='nav-item' onclick='nav(this,\"agents\")'>🤖 Agents</button>"
         << "<button class='nav-item' onclick='nav(this,\"computer\")'>🖥 Computer</button>"
+        << "<button class='nav-item' onclick='nav(this,\"terminal\")'>⌨ Terminal</button>"
         << "<button class='nav-item' onclick='nav(this,\"chat\")'>💬 Chat</button>"
         << "<div class='nav-sep'></div>"
+        << "<button class='nav-item' onclick='nav(this,\"notes\")'>📝 Notes</button>"
         << "<button class='nav-item' onclick='nav(this,\"files\")'>📁 Files</button>"
         << "<button class='nav-item' onclick='nav(this,\"projects\")'>🚀 Projects</button>"
         << "<button class='nav-item' onclick='nav(this,\"datasets\")'>📊 Datasets</button>"
@@ -337,9 +339,13 @@ button,input,select,textarea{font-family:inherit;font-size:.84rem}
         << "<button class='nav-item' onclick='nav(this,\"personas\")'>🎭 Personas</button>"
         << "<button class='nav-item' onclick='nav(this,\"rules\")'>📜 Rules</button>"
         << "<button class='nav-item' onclick='nav(this,\"snapshots\")'>📸 Snapshots</button>"
+        << "<button class='nav-item' onclick='nav(this,\"git\")'>🔀 Git</button>"
         << "<button class='nav-item' onclick='nav(this,\"system\")'>📡 System</button>"
         << "<div class='nav-sep'></div>"
-        << "<button class='nav-item' onclick='nav(this,\"audit\")'>🔍 Audit</button>"
+        << "<button class='nav-item' onclick='nav(this,\"search\")'>🔍 Search</button>"
+        << "<button class='nav-item' onclick='nav(this,\"notifications\")'>🔔 Notifications"
+        << "<span class='badge' id='nav-notif-badge'></span></button>"
+        << "<button class='nav-item' onclick='nav(this,\"audit\")'>📋 Audit</button>"
         << "<button class='nav-item' onclick='nav(this,\"settings\")'>⚙ Settings</button>"
         << "</nav>";
 
@@ -479,6 +485,7 @@ function renderPanel(panel) {
     case 'agents':      content.innerHTML = renderAgents();      break;
     case 'computer':    content.innerHTML = renderComputer();    break;
     case 'chat':        content.innerHTML = renderChat();        break;
+    case 'notes':       content.innerHTML = renderNotes();       break;
     case 'files':       content.innerHTML = renderFiles();       break;
     case 'projects':    content.innerHTML = renderProjects();    break;
     case 'datasets':    content.innerHTML = renderDatasets();    break;
@@ -489,6 +496,10 @@ function renderPanel(panel) {
     case 'rules':       content.innerHTML = renderRules();       break;
     case 'snapshots':   content.innerHTML = renderSnapshots();   break;
     case 'system':      content.innerHTML = renderSystem();      break;
+    case 'git':         content.innerHTML = renderGit();         break;
+    case 'search':      content.innerHTML = renderSearch();      break;
+    case 'notifications': content.innerHTML = renderNotifications(); break;
+    case 'terminal':    content.innerHTML = renderTerminalPanel(); break;
     case 'audit':       content.innerHTML = renderAudit();       break;
     case 'settings':    content.innerHTML = renderSettings();    break;
     default:            content.innerHTML = renderOverview();
@@ -1478,6 +1489,343 @@ async function renderSystemAsync() {
   h += `<div style="margin-top:12px"><button class="btn sm" onclick="renderPanel('system')">↻ Refresh</button></div></div>`;
   content.innerHTML = h;
 }
+
+// ─── Notes panel ──────────────────────────────────────────────────────────────
+let noteEditId = null;
+function renderNotes() {
+  setTimeout(renderNotesAsync, 0);
+  return '<div class="empty">Loading notes...</div>';
+}
+async function renderNotesAsync() {
+  const notes = await fetch('/api/notes').then(r=>r.json()).catch(()=>[]);
+  const content = document.getElementById('content');
+  let h = `<div style="display:grid;grid-template-columns:280px 1fr;gap:0;height:calc(100vh - 80px)">
+    <div style="background:var(--surface);border-right:1px solid var(--border);overflow-y:auto;padding:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <span style="font-weight:700;font-size:.9rem">📝 Notes</span>
+        <button class="btn sm" onclick="newNote()">+</button>
+      </div>`;
+  if (!notes.length) h += '<div class="empty" style="font-size:.8rem">No notes yet</div>';
+  notes.forEach(n => {
+    h += `<div onclick="openNote('${n.id}')" style="padding:10px;border-radius:8px;cursor:pointer;margin-bottom:6px;background:var(--surface2);border-left:3px solid ${n.pinned?'var(--accent)':'transparent'}">
+      <div style="font-weight:600;font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${n.pinned?'📌 ':''}${n.title}</div>
+      <div style="color:var(--muted);font-size:.72rem;margin-top:3px">${n.content.substring(0,60)}${n.content.length>60?'...':''}</div>
+      <div style="color:var(--muted);font-size:.68rem;margin-top:4px">${new Date(n.updated_at*1000).toLocaleDateString()}</div>
+    </div>`;
+  });
+  h += `</div>
+    <div id="note-editor" style="display:flex;flex-direction:column;padding:24px">
+      <div class="empty" style="margin:auto">Select a note or create a new one</div>
+    </div>
+  </div>`;
+  content.innerHTML = h;
+}
+async function newNote() {
+  const ed = document.getElementById('note-editor');
+  if (!ed) return;
+  noteEditId = null;
+  ed.innerHTML = `<input id="note-title" type="text" placeholder="Note title..." style="font-size:1.2rem;font-weight:700;background:transparent;border:none;border-bottom:2px solid var(--accent);padding:8px 0;color:var(--text);width:100%;margin-bottom:16px;outline:none">
+    <textarea id="note-content" placeholder="Write in markdown..." style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:16px;color:var(--text);font-size:.9rem;resize:none;font-family:inherit;min-height:300px"></textarea>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn" onclick="saveNote()">💾 Save</button>
+    </div>`;
+}
+async function openNote(id) {
+  const n = await fetch(`/api/notes/${id}`).then(r=>r.json()).catch(()=>null);
+  if (!n) return;
+  noteEditId = id;
+  const ed = document.getElementById('note-editor');
+  if (!ed) return;
+  ed.innerHTML = `<input id="note-title" type="text" value="${n.title.replace(/"/g,'&quot;')}" style="font-size:1.2rem;font-weight:700;background:transparent;border:none;border-bottom:2px solid var(--accent);padding:8px 0;color:var(--text);width:100%;margin-bottom:16px;outline:none">
+    <textarea id="note-content" style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:16px;color:var(--text);font-size:.9rem;resize:none;font-family:inherit;min-height:300px">${n.content}</textarea>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn" onclick="saveNote()">💾 Save</button>
+      <button class="btn sm" onclick="pinNote('${id}',${!n.pinned})">${n.pinned?'Unpin':'📌 Pin'}</button>
+      <button class="btn sm danger" onclick="deleteNoteId('${id}')">🗑 Delete</button>
+    </div>`;
+}
+async function saveNote() {
+  const title   = document.getElementById('note-title')?.value.trim();
+  const content = document.getElementById('note-content')?.value;
+  if (!title) { toast('Title required','err'); return; }
+  if (noteEditId) {
+    await fetch(`/api/notes/${noteEditId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,content})});
+    toast('Note saved');
+  } else {
+    const r = await fetch('/api/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,content})}).then(r=>r.json());
+    noteEditId = r.id;
+    toast('Note created');
+  }
+  renderNotesAsync();
+}
+async function pinNote(id, pinned) {
+  await fetch(`/api/notes/${id}/pin`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pinned:String(pinned)})});
+  renderNotesAsync();
+}
+async function deleteNoteId(id) {
+  if (!confirm('Delete this note?')) return;
+  await fetch(`/api/notes/${id}`,{method:'DELETE'});
+  noteEditId = null;
+  renderNotesAsync();
+}
+
+// ─── Terminal panel ────────────────────────────────────────────────────────────
+let termHistory = [], termIdx = -1;
+function renderTerminalPanel() {
+  setTimeout(loadTermHistory, 0);
+  return `<div style="display:flex;flex-direction:column;height:calc(100vh - 80px);font-family:monospace">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:var(--surface2);border-bottom:1px solid var(--border)">
+      <span style="font-weight:700">⌨ Terminal</span>
+      <div style="display:flex;gap:8px">
+        <input id="term-cwd" type="text" placeholder="Working dir (optional)" style="padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:.75rem;width:200px">
+        <button class="btn sm" onclick="clearTerm()">Clear</button>
+      </div>
+    </div>
+    <div id="term-output" style="flex:1;overflow-y:auto;padding:16px;background:#0d1117;color:#e6edf3;font-size:.85rem;line-height:1.6"></div>
+    <div style="display:flex;gap:0;background:#0d1117;border-top:1px solid #30363d;padding:8px 12px">
+      <span style="color:#7ee787;padding:8px 0;margin-right:8px">$</span>
+      <input id="term-input" type="text" placeholder="Enter command..." style="flex:1;background:transparent;border:none;color:#e6edf3;font-size:.85rem;font-family:monospace;outline:none"
+        onkeydown="handleTermKey(event)">
+      <button onclick="execTerm()" style="background:#238636;color:#fff;border:none;border-radius:4px;padding:6px 14px;cursor:pointer;font-size:.8rem">Run</button>
+    </div>
+  </div>`;
+}
+async function loadTermHistory() {
+  const hist = await fetch('/api/terminal/history?limit=100').then(r=>r.json()).catch(()=>[]);
+  const out = document.getElementById('term-output');
+  if (!out) return;
+  out.innerHTML = hist.map(e =>
+    `<div style="margin-bottom:10px"><span style="color:#7ee787">$ ${e.command}</span>${e.exit_code!==0?`<span style="color:#f85149;margin-left:8px">[exit ${e.exit_code}]</span>`:''}<pre style="margin:4px 0 0;color:#e6edf3;white-space:pre-wrap;font-size:.82rem">${e.output}</pre></div>`
+  ).join('') + '<div id="term-cursor"></div>';
+  out.scrollTop = out.scrollHeight;
+}
+function handleTermKey(e) {
+  if (e.key === 'Enter') { execTerm(); return; }
+  if (e.key === 'ArrowUp') {
+    termIdx = Math.min(termIdx + 1, termHistory.length - 1);
+    e.target.value = termHistory[termHistory.length - 1 - termIdx] || '';
+  }
+  if (e.key === 'ArrowDown') {
+    termIdx = Math.max(termIdx - 1, -1);
+    e.target.value = termIdx < 0 ? '' : termHistory[termHistory.length - 1 - termIdx];
+  }
+}
+async function execTerm() {
+  const inp = document.getElementById('term-input');
+  const cmd = inp?.value.trim();
+  if (!cmd) return;
+  termHistory.push(cmd); termIdx = -1;
+  inp.value = '';
+  const out = document.getElementById('term-output');
+  if (out) {
+    const pending = document.createElement('div');
+    pending.style.cssText = 'margin-bottom:10px;opacity:.6';
+    pending.innerHTML = `<span style="color:#7ee787">$ ${cmd}</span> <span style="color:#8b949e">running...</span>`;
+    out.appendChild(pending);
+    out.scrollTop = out.scrollHeight;
+  }
+  const cwd = document.getElementById('term-cwd')?.value || '';
+  const r = await fetch('/api/terminal/exec',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:cmd,cwd})}).then(r=>r.json()).catch(()=>({output:'[error]',exit_code:-1}));
+  if (out) {
+    out.innerHTML = out.innerHTML.replace(/<div[^>]*opacity.*?<\/div>/, '');
+    const el = document.createElement('div');
+    el.style.marginBottom = '10px';
+    el.innerHTML = `<span style="color:#7ee787">$ ${cmd}</span>${r.exit_code!==0?`<span style="color:#f85149;margin-left:8px">[exit ${r.exit_code}]</span>`:''}<pre style="margin:4px 0 0;color:#e6edf3;white-space:pre-wrap;font-size:.82rem">${r.output}</pre>`;
+    out.appendChild(el);
+    out.scrollTop = out.scrollHeight;
+  }
+}
+async function clearTerm() {
+  await fetch('/api/terminal/clear',{method:'POST'});
+  const out = document.getElementById('term-output');
+  if (out) out.innerHTML = '<div id="term-cursor"></div>';
+}
+
+// ─── Git panel ────────────────────────────────────────────────────────────────
+function renderGit() {
+  setTimeout(renderGitAsync, 0);
+  return '<div class="empty">Loading git status...</div>';
+}
+async function renderGitAsync() {
+  const cwd = document.getElementById('git-cwd-input')?.value || '';
+  const [gs, log] = await Promise.all([
+    fetch(`/api/git/status${cwd?'?cwd='+encodeURIComponent(cwd):''}`).then(r=>r.json()).catch(()=>({})),
+    fetch(`/api/git/log${cwd?'?cwd='+encodeURIComponent(cwd):''}&limit=15`).then(r=>r.json()).catch(()=>({}))
+  ]);
+  const content = document.getElementById('content');
+  const statusColor = gs.branch ? 'var(--accent)' : '#ef4444';
+  let h = `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <h3>🔀 Git</h3>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input id="git-cwd-input" type="text" value="${cwd}" placeholder="Repo path..." style="padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.8rem;width:240px">
+      <button class="btn sm" onclick="renderGit()">↻</button>
+    </div>
+  </div>
+  ${gs.branch ? `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">
+    <div style="padding:8px 14px;background:var(--surface2);border-radius:8px">
+      <div style="color:var(--muted);font-size:.7rem">Branch</div>
+      <div style="font-weight:700;color:${statusColor}">${gs.branch}</div>
+    </div>
+    <div style="padding:8px 14px;background:var(--surface2);border-radius:8px">
+      <div style="color:var(--muted);font-size:.7rem">Ahead/Behind</div>
+      <div style="font-weight:700">↑${gs.ahead} ↓${gs.behind}</div>
+    </div>
+    <div style="padding:8px 14px;background:var(--surface2);border-radius:8px">
+      <div style="color:var(--muted);font-size:.7rem">Last commit</div>
+      <div style="font-weight:600;font-size:.8rem">${gs.last_commit_msg?.substring(0,50)||'—'}</div>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <button class="btn sm" onclick="gitPull()">↓ Pull</button>
+      <button class="btn sm" onclick="gitPush()">↑ Push</button>
+      <button class="btn sm" onclick="gitAddAll()">+ Add all</button>
+      <button class="btn sm" onclick="gitCommitDialog()">✓ Commit</button>
+    </div>
+  </div>` : '<div class="empty">No git repo found at this path. Enter a repo path above.</div>'}`;
+
+  if (gs.staged?.length || gs.unstaged?.length || gs.untracked?.length) {
+    h += `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">`;
+    const col = (label, color, files) => `<div style="background:var(--surface2);border-radius:8px;padding:12px">
+      <div style="color:${color};font-size:.75rem;font-weight:700;margin-bottom:8px">${label} (${files.length})</div>
+      ${files.map(f=>`<div style="font-size:.75rem;font-family:monospace;color:var(--text);padding:2px 0">${f}</div>`).join('')}
+    </div>`;
+    h += col('● Staged','#22c55e', gs.staged||[]);
+    h += col('○ Unstaged','#f59e0b', gs.unstaged||[]);
+    h += col('? Untracked','var(--muted)', gs.untracked||[]);
+    h += '</div>';
+  }
+
+  if (log.log) {
+    h += `<h4 style="margin-bottom:10px">Commit Log</h4>
+    <pre style="background:var(--bg);padding:14px;border-radius:8px;font-size:.78rem;overflow-x:auto;color:var(--text)">${log.log}</pre>`;
+  }
+  h += '</div>';
+  content.innerHTML = h;
+}
+async function gitPull() {
+  const cwd = document.getElementById('git-cwd-input')?.value||'';
+  const r = await fetch('/api/git/pull',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cwd})}).then(r=>r.json());
+  toast(r.output?.substring(0,80)||'Pulled'); renderGitAsync();
+}
+async function gitPush() {
+  const cwd = document.getElementById('git-cwd-input')?.value||'';
+  const r = await fetch('/api/git/push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cwd})}).then(r=>r.json());
+  toast(r.output?.substring(0,80)||'Pushed'); renderGitAsync();
+}
+async function gitAddAll() {
+  const cwd = document.getElementById('git-cwd-input')?.value||'';
+  await fetch('/api/git/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pattern:'.',cwd})});
+  toast('Staged all changes'); renderGitAsync();
+}
+async function gitCommitDialog() {
+  const msg = prompt('Commit message:'); if (!msg) return;
+  const cwd = document.getElementById('git-cwd-input')?.value||'';
+  const r = await fetch('/api/git/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg,cwd})}).then(r=>r.json());
+  toast(r.output?.substring(0,80)||'Committed'); renderGitAsync();
+}
+
+// ─── Global search panel ──────────────────────────────────────────────────────
+function renderSearch() {
+  return `<div class="card" style="max-width:760px;margin:0 auto">
+    <h3 style="margin-bottom:16px">🔍 Global Search</h3>
+    <div style="display:flex;gap:8px;margin-bottom:20px">
+      <input id="search-input" type="text" placeholder="Search tasks, files, notes, memory, agents..." autofocus
+        style="flex:1;padding:12px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.95rem"
+        oninput="debounceSearch(this.value)" onkeydown="if(event.key==='Enter')doSearch()">
+      <button class="btn" onclick="doSearch()">Search</button>
+    </div>
+    <div id="search-results"></div>
+  </div>`;
+}
+let searchTimer = null;
+function debounceSearch(q) {
+  clearTimeout(searchTimer);
+  if (q.length < 2) { document.getElementById('search-results').innerHTML = ''; return; }
+  searchTimer = setTimeout(() => doSearch(q), 300);
+}
+async function doSearch(q) {
+  q = q ?? document.getElementById('search-input')?.value ?? '';
+  if (!q) return;
+  const r = await fetch(`/api/search?q=${encodeURIComponent(q)}&limit=30`).then(r=>r.json()).catch(()=>({results:[]}));
+  const icons = {task:'📋',file:'📁',memory:'🧠',note:'📝',agent:'🤖',project:'🚀',knowledge:'📚'};
+  const colors = {task:'var(--accent)',file:'#22c55e',memory:'#a78bfa',note:'#fb923c',agent:'#60a5fa',project:'#34d399',knowledge:'#f472b6'};
+  const container = document.getElementById('search-results');
+  if (!container) return;
+  if (!r.results?.length) { container.innerHTML = `<div class="empty">No results for "${q}"</div>`; return; }
+  container.innerHTML = `<div style="color:var(--muted);font-size:.8rem;margin-bottom:12px">${r.count} results</div>` +
+    r.results.map(res => `
+    <div style="display:flex;gap:12px;padding:12px;background:var(--surface2);border-radius:8px;margin-bottom:8px;cursor:pointer;border-left:3px solid ${colors[res.kind]||'var(--border)'}"
+      onclick="searchNavigate('${res.kind}','${res.id}')">
+      <span style="font-size:1.2rem">${icons[res.kind]||'📄'}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:.9rem">${res.title}</div>
+        <div style="color:var(--muted);font-size:.75rem;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${res.snippet}</div>
+      </div>
+      <span style="color:var(--muted);font-size:.7rem;white-space:nowrap;padding:2px 6px;background:var(--bg);border-radius:4px">${res.kind}</span>
+    </div>`).join('');
+}
+function searchNavigate(kind, id) {
+  const panelMap = {task:'tasks',file:'files',memory:'memory',note:'notes',agent:'agents',project:'projects',knowledge:'knowledge'};
+  const panel = panelMap[kind];
+  if (panel) nav(document.querySelector(`.nav-item[onclick*="${panel}"]`), panel);
+}
+
+// ─── Notifications panel ──────────────────────────────────────────────────────
+function renderNotifications() {
+  setTimeout(renderNotificationsAsync, 0);
+  return '<div class="empty">Loading notifications...</div>';
+}
+async function renderNotificationsAsync() {
+  const data = await fetch('/api/notifications').then(r=>r.json()).catch(()=>({unread:0,items:[]}));
+  const content = document.getElementById('content');
+  const kindIcon = {info:'ℹ️',success:'✅',warn:'⚠️',error:'❌'};
+  const kindColor = {info:'#60a5fa',success:'#22c55e',warn:'#f59e0b',error:'#ef4444'};
+  let h = `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <h3>🔔 Notifications${data.unread>0?` <span style="background:var(--accent);color:#fff;border-radius:10px;padding:2px 8px;font-size:.7rem">${data.unread} new</span>`:''}</h3>
+    ${data.unread>0?`<button class="btn sm" onclick="markAllRead()">Mark all read</button>`:''}
+  </div>`;
+  if (!data.items?.length) h += '<div class="empty">No notifications</div>';
+  else h += '<div class="scroll-list">' + data.items.map(n => `
+    <div style="display:flex;align-items:flex-start;gap:12px;padding:12px;background:var(--surface2);border-radius:8px;margin-bottom:8px;opacity:${n.read?0.6:1};border-left:3px solid ${kindColor[n.kind]||'var(--border)'}">
+      <span style="font-size:1.2rem;margin-top:2px">${kindIcon[n.kind]||'•'}</span>
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:.88rem">${n.title}</div>
+        <div style="color:var(--muted);font-size:.78rem;margin-top:2px">${n.detail}</div>
+        <div style="color:var(--muted);font-size:.7rem;margin-top:4px">${new Date(n.created_at*1000).toLocaleString()}</div>
+      </div>
+      <div style="display:flex;gap:4px">
+        ${!n.read?`<button class="btn sm" onclick="markRead('${n.id}')">✓</button>`:''}
+        <button class="btn sm danger" onclick="deleteNotif('${n.id}')">×</button>
+      </div>
+    </div>`).join('') + '</div>';
+  h += '</div>';
+  content.innerHTML = h;
+  // Update badge
+  const badge = document.getElementById('nav-notif-badge');
+  if (badge) badge.textContent = data.unread > 0 ? String(data.unread) : '';
+}
+async function markRead(id) {
+  await fetch(`/api/notifications/${id}/read`,{method:'POST'});
+  renderNotificationsAsync();
+}
+async function markAllRead() {
+  await fetch('/api/notifications/read-all',{method:'POST'});
+  renderNotificationsAsync();
+}
+async function deleteNotif(id) {
+  await fetch(`/api/notifications/${id}`,{method:'DELETE'});
+  renderNotificationsAsync();
+}
+
+// ─── Update SSE handler to update notification badge ──────────────────────────
+const _origSSEHandler = window._sseHandler;
+async function pollNotifBadge() {
+  const data = await fetch('/api/notifications?unread=1').then(r=>r.json()).catch(()=>({unread:0}));
+  const badge = document.getElementById('nav-notif-badge');
+  if (badge) badge.textContent = data.unread > 0 ? String(data.unread) : '';
+}
+setInterval(pollNotifBadge, 10000);
+pollNotifBadge();
+
 
 </script>)JS";
 

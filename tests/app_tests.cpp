@@ -784,6 +784,191 @@ int main() {
         CHECK(html.find("/api/luo_os/chat")   != std::string::npos);
     }
 
+    // ── Notes ─────────────────────────────────────────────────────────────────
+    section("Notes");
+    {
+        auto id1 = app.create_note("My first note", "## Hello\nThis is content.", {"work","ideas"});
+        auto id2 = app.create_note("Pinned note",   "Important stuff",           {"work"});
+        CHECK(!id1.empty()); CHECK(!id2.empty()); CHECK(id1 != id2);
+
+        CHECK(app.pin_note(id2, true));
+        auto notes = app.notes();
+        CHECK(notes.size() >= 2);
+        // Pinned note should be first
+        CHECK(notes[0].pinned);
+        CHECK(notes[0].id == id2);
+
+        // Update
+        CHECK(app.update_note(id1, "Updated title", "New content", {"updated"}));
+        for (const auto& n : app.notes()) {
+            if (n.id == id1) {
+                CHECK(n.title == "Updated title");
+                CHECK(n.content == "New content");
+            }
+        }
+
+        // Tag filter
+        auto tagged = app.notes("work");
+        bool found = false;
+        for (const auto& n : tagged) if (n.id == id2) { found = true; break; }
+        CHECK(found);
+
+        // Delete
+        auto before = app.notes().size();
+        CHECK(app.delete_note(id1));
+        CHECK(app.notes().size() == before - 1);
+        CHECK(!app.delete_note("bad-id"));
+        app.delete_note(id2);
+    }
+
+    // ── Notifications ────────────────────────────────────────────────────────
+    section("Notifications");
+    {
+        auto n1 = app.push_notification("info",    "Task completed",  "agent-1 finished", "/tasks");
+        auto n2 = app.push_notification("warn",    "High memory",     "90% used",         "");
+        auto n3 = app.push_notification("success", "Snapshot saved",  "snap-1",           "");
+        CHECK(!n1.empty()); CHECK(!n2.empty()); CHECK(n3 != n1);
+
+        CHECK(app.unread_notification_count() >= 3);
+
+        auto all = app.notifications();
+        CHECK(all.size() >= 3);
+        // Most recent first
+        bool found_info = false;
+        for (const auto& n : all) {
+            if (n.id == n1) { CHECK(!n.read); found_info = true; }
+        }
+        CHECK(found_info);
+
+        CHECK(app.mark_notification_read(n1));
+        for (const auto& n : app.notifications()) {
+            if (n.id == n1) CHECK(n.read);
+        }
+
+        auto unread_before = app.unread_notification_count();
+        app.mark_all_notifications_read();
+        CHECK(app.unread_notification_count() == 0);
+
+        CHECK(app.delete_notification(n2));
+        CHECK(!app.delete_notification("bad-id"));
+    }
+
+    // ── Terminal execution ────────────────────────────────────────────────────
+    section("Terminal exec");
+    {
+        auto r = app.exec_command("echo hello_luo_computer");
+        CHECK(r.command == "echo hello_luo_computer");
+        CHECK(r.output.find("hello_luo_computer") != std::string::npos);
+        CHECK(r.exit_code == 0);
+        CHECK(r.created_at > 0);
+
+        auto r2 = app.exec_command("echo line1 && echo line2");
+        CHECK(r2.output.find("line1") != std::string::npos);
+        CHECK(r2.output.find("line2") != std::string::npos);
+
+        // Non-zero exit
+        auto r3 = app.exec_command("exit 42", "");
+        CHECK(r3.exit_code != 0);
+
+        auto hist = app.terminal_history(10);
+        CHECK(hist.size() >= 3);
+        CHECK(hist.back().command == "exit 42");
+
+        app.clear_terminal_history();
+        CHECK(app.terminal_history(100).empty());
+    }
+
+    // ── Git integration ───────────────────────────────────────────────────────
+    section("Git status");
+    {
+        // luo-computer is itself a git repo — use it
+        const std::string repo = "/home/claude/luo-computer";
+        app.set_git_cwd(repo);
+
+        auto gs = app.git_status(repo);
+        CHECK(!gs.branch.empty());             // on some branch
+        CHECK(!gs.last_commit_hash.empty());   // has commits
+
+        auto log = app.git_log(repo, 5);
+        CHECK(!log.empty());
+        CHECK(log.find('\n') != std::string::npos); // multiple lines
+
+        auto diff = app.git_diff(repo, "");
+        // diff may be empty if nothing changed — just check it doesn't crash
+        CHECK(diff.size() < 1000000);
+    }
+
+    // ── Global search ─────────────────────────────────────────────────────────
+    section("Global search");
+    {
+        // Seed some searchable content
+        app.create_note("Search test note", "This note contains the word quantum");
+        app.create_task("Search test task", "Investigate quantum computing", "research");
+
+        auto results = app.global_search("quantum");
+        CHECK(results.size() >= 2);
+        bool found_note = false, found_task = false;
+        for (const auto& r : results) {
+            if (r.kind == "note" && r.title == "Search test note") found_note = true;
+            if (r.kind == "task" && r.title == "Search test task") found_task = true;
+        }
+        CHECK(found_note); CHECK(found_task);
+
+        // Results should be sorted by score (most relevant first)
+        CHECK(results[0].score >= results.back().score);
+
+        // Empty query returns nothing
+        CHECK(app.global_search("").empty());
+
+        // No match
+        auto none = app.global_search("xyzzy_not_found_abc");
+        CHECK(none.empty());
+    }
+
+    // ── File write/read/delete ────────────────────────────────────────────────
+    section("File write/read/delete");
+    {
+        CHECK(app.write_file_content("test.py", "print('hello world')", "test"));
+        auto content = app.read_file_content("test.py");
+        CHECK(content == "print('hello world')");
+
+        // Update existing file (versioned)
+        CHECK(app.write_file_content("test.py", "print('updated')", "test"));
+        CHECK(app.read_file_content("test.py") == "print('updated')");
+
+        // Non-existent file returns empty
+        CHECK(app.read_file_content("nonexistent.xyz").empty());
+
+        // Delete
+        CHECK(app.delete_file("test.py"));
+        CHECK(app.read_file_content("test.py").empty());
+        CHECK(!app.delete_file("test.py")); // already gone
+    }
+
+    // ── Dashboard HTML — workspace panels ────────────────────────────────────
+    section("Dashboard HTML — workspace panels");
+    {
+        const auto html = render_dashboard_html(app);
+        // New sidebar nav items
+        CHECK(html.find("Notes")            != std::string::npos);
+        CHECK(html.find("Terminal")         != std::string::npos);
+        CHECK(html.find("Git")              != std::string::npos);
+        CHECK(html.find("Search")           != std::string::npos);
+        CHECK(html.find("Notifications")    != std::string::npos);
+        // JS panel functions
+        CHECK(html.find("renderNotes")          != std::string::npos);
+        CHECK(html.find("renderTerminalPanel")  != std::string::npos);
+        CHECK(html.find("renderGit")            != std::string::npos);
+        CHECK(html.find("renderSearch")         != std::string::npos);
+        CHECK(html.find("renderNotifications")  != std::string::npos);
+        // API endpoints referenced
+        CHECK(html.find("/api/notes")           != std::string::npos);
+        CHECK(html.find("/api/terminal/exec")   != std::string::npos);
+        CHECK(html.find("/api/git/status")      != std::string::npos);
+        CHECK(html.find("/api/search")          != std::string::npos);
+        CHECK(html.find("/api/notifications")   != std::string::npos);
+    }
+
     section("Logout");
     app.logout();
     CHECK(!app.authenticated());
